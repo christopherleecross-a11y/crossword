@@ -8,14 +8,14 @@
 :root{
   --bg:#f4f1ea; --panel:#ffffff; --ink:#1d1d1f; --muted:#6b6b70; --line:#1d1d1f;
   --cell:#ffffff; --sel:#ffd84d; --word:#cfe3ff; --cross:#eef4ff;
-  --wrong:#d93025; --revealed:#7a4cc2; --accent:#2457d6; --accent-ink:#fff;
+  --wrong:#d93025; --revealed:#7a4cc2; --accent:#2457d6; --accent-ink:#fff; --given:#1f7a52;
   --shadow:0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.06);
 }
 @media (prefers-color-scheme: dark){
   :root{
     --bg:#141416; --panel:#1f1f23; --ink:#ececf0; --muted:#9a9aa2; --line:#6a6a72;
     --cell:#2a2a30; --sel:#a8841a; --word:#2c4469; --cross:#252b36;
-    --wrong:#ff6b5e; --revealed:#b794f6; --accent:#6d93ff; --accent-ink:#0f1020;
+    --wrong:#ff6b5e; --revealed:#b794f6; --accent:#6d93ff; --accent-ink:#0f1020; --given:#5fd3a0;
     --shadow:0 1px 3px rgba(0,0,0,.4);
   }
 }
@@ -36,6 +36,12 @@ h1{margin:0;font-size:1.6rem;letter-spacing:-.02em}
 .btn,select{background:var(--panel);border:1px solid color-mix(in srgb,var(--ink) 18%,transparent);border-radius:8px;padding:6px 12px;cursor:pointer}
 .btn:hover{border-color:var(--accent)}
 .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.seg{display:inline-flex;border:1px solid color-mix(in srgb,var(--ink) 18%,transparent);border-radius:8px;overflow:hidden}
+.seg button{background:var(--panel);border:0;padding:6px 12px;cursor:pointer}
+.seg button+button{border-left:1px solid color-mix(in srgb,var(--ink) 18%,transparent)}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.cell.given .ltr{color:var(--given)}
+.clues li .len{color:var(--muted);white-space:nowrap}
 label.toggle{display:flex;align-items:center;gap:6px;font-size:.9rem;cursor:pointer;user-select:none}
 
 details.menu{position:relative}
@@ -106,6 +112,9 @@ aside.clues{flex:1 1 300px;display:grid;grid-template-columns:1fr 1fr;gap:12px;m
   <header>
     <h1>Crossword <span id="ptitle"></span></h1>
     <div class="controls">
+      <div class="seg" id="diffSeg" role="group" aria-label="Difficulty">
+        <button data-diff="easy">Easy</button><button data-diff="medium">Medium</button><button data-diff="hard">Hard</button>
+      </div>
       <select id="packSelect" aria-label="Puzzle theme"></select>
       <button class="btn primary" id="newBtn">New puzzle</button>
       <button class="btn" id="customBtn">Make your own</button>
@@ -156,7 +165,7 @@ aside.clues{flex:1 1 300px;display:grid;grid-template-columns:1fr 1fr;gap:12px;m
 <div class="modal" id="customModal">
   <div class="dialog">
     <h3>Make your own crossword</h3>
-    <p>One entry per line: <b>ANSWER: clue</b> (you can also use <b>=</b>, <b> - </b>, or a tab). Spaces and punctuation in answers are ignored. 8–20 words works best. Use “Copy share link” afterward to send it to anyone.</p>
+    <p>One entry per line: <b>ANSWER: clue</b> (you can also use <b>=</b>, <b> - </b>, or a tab). Spaces and punctuation in answers are ignored. 8–20 words works best. All your words are used at every level. The difficulty you've picked controls the hints: Easy pre-fills some letters, and Hard hides the answer lengths. Use “Copy share link” afterward to send it to anyone.</p>
     <input type="text" id="customTitle" placeholder="Puzzle title (optional)">
     <textarea id="customWords" placeholder="photosynthesis: How plants turn light into food
 mitochondria: Powerhouse of the cell
@@ -188,58 +197,141 @@ osmosis: Movement of water across a membrane"></textarea>
 'use strict';
 
 /* ================= WORD PACKS ================= */
+// Each entry: [ANSWER, straightforward clue (Easy/Medium), trickier clue (Hard)]
 const PACKS = {
   "General Knowledge": [
-    ["OCEAN","Large body of salt water"],["PIANO","Instrument with 88 keys"],["LIBRARY","Place to borrow books"],
-    ["CASTLE","Fortified medieval home"],["RAINBOW","Arc of colors after a storm"],["VOLCANO","Mountain that may erupt"],
-    ["COMPASS","Tool that points north"],["LANTERN","Portable light with a handle"],["WHISPER","Speak very softly"],
-    ["PUZZLE","Something to solve, like this!"],["HARBOR","Sheltered place for ships"],["JUNGLE","Dense tropical forest"],
-    ["TICKET","Pass for a concert or train"],["BLANKET","Cozy bed covering"],["MIRROR","Reflective glass"],
-    ["ANCHOR","Keeps a ship in place"],["THUNDER","Sound that follows lightning"],["CANDLE","Wax light with a wick"],
-    ["GARDEN","Place to grow flowers"],["ORBIT","Path around a planet"],["KETTLE","Pot for boiling water"],
-    ["SUMMIT","Top of a mountain"]
+    ["OCEAN","Large body of salt water","Atlantic or Indian, e.g."],
+    ["PIANO","Instrument with 88 keys","Grand or upright"],
+    ["LIBRARY","Place to borrow books","Dewey Decimal's domain"],
+    ["CASTLE","Fortified medieval home","Rook, by another name"],
+    ["RAINBOW","Arc of colors after a storm","Roy G. Biv's arc"],
+    ["VOLCANO","Mountain that may erupt","Vesuvius, for one"],
+    ["COMPASS","Tool that points north","Navigator's aid, or a geometry tool for circles"],
+    ["LANTERN","Portable light with a handle","Jack-o'-___"],
+    ["WHISPER","Speak very softly","Sound passed along in a game of telephone"],
+    ["PUZZLE","Something to solve, like this!","Jigsaw, e.g."],
+    ["HARBOR","Sheltered place for ships","Pearl ___"],
+    ["JUNGLE","Dense tropical forest","Kipling's \"The ___ Book\""],
+    ["TICKET","Pass for a concert or train","Speeding ___"],
+    ["BLANKET","Cozy bed covering","Kind of statement that covers everything"],
+    ["MIRROR","Reflective glass","Snow White's wicked queen consulted one"],
+    ["ANCHOR","Keeps a ship in place","Evening news host"],
+    ["THUNDER","Sound that follows lightning","Steal someone's ___"],
+    ["CANDLE","Wax light with a wick","Can't hold a ___ to"],
+    ["GARDEN","Place to grow flowers","Madison Square ___"],
+    ["ORBIT","Path around a planet","Satellite's route, or a chewing gum brand"],
+    ["KETTLE","Pot for boiling water","It's called black by the pot"],
+    ["SUMMIT","Top of a mountain","Meeting of world leaders"]
   ],
   "Animals": [
-    ["GIRAFFE","Tallest land animal"],["PENGUIN","Flightless bird of Antarctica"],["DOLPHIN","Clever marine mammal that clicks and whistles"],
-    ["OCTOPUS","Eight-armed sea creature"],["CHEETAH","Fastest land animal"],["TORTOISE","Slow, shelled land reptile"],
-    ["KANGAROO","Australian hopper with a pouch"],["OWL","Nocturnal bird that hoots"],["BEAVER","Dam-building rodent"],
-    ["ZEBRA","Striped African grazer"],["EAGLE","Bald national bird of the USA"],["CAMEL","Desert animal with humps"],
-    ["WALRUS","Tusked Arctic mammal"],["SALMON","Fish that swims upstream to spawn"],["LOBSTER","Clawed crustacean"],
-    ["FLAMINGO","Pink wading bird"],["HEDGEHOG","Spiny little mammal"],["RACCOON","Masked nighttime raider"],
-    ["SQUID","Ten-armed sea creature"],["BADGER","Burrower with a striped face"],["MOOSE","Largest member of the deer family"],
-    ["PANDA","Black-and-white bamboo eater"]
+    ["GIRAFFE","Tallest land animal","Long-necked browser of acacia leaves"],
+    ["PENGUIN","Flightless bird of Antarctica","Batman villain with an umbrella"],
+    ["DOLPHIN","Clever marine mammal that clicks and whistles","Miami NFL player"],
+    ["OCTOPUS","Eight-armed sea creature","Cephalopod with three hearts"],
+    ["CHEETAH","Fastest land animal","Spotted sprinter of the savanna"],
+    ["TORTOISE","Slow, shelled land reptile","Aesop's hare-beater"],
+    ["KANGAROO","Australian hopper with a pouch","Joey's mother"],
+    ["OWL","Nocturnal bird that hoots","Hedwig, in Harry Potter"],
+    ["BEAVER","Dam-building rodent","Eager ___"],
+    ["ZEBRA","Striped African grazer","Referee, slangily"],
+    ["EAGLE","Bald national bird of the USA","Two under par"],
+    ["CAMEL","Desert animal with humps","Dromedary or Bactrian"],
+    ["WALRUS","Tusked Arctic mammal","Whiskered pinniped"],
+    ["SALMON","Fish that swims upstream to spawn","Pinkish-orange shade"],
+    ["LOBSTER","Clawed crustacean","Maine catch"],
+    ["FLAMINGO","Pink wading bird","Plastic lawn ornament bird"],
+    ["HEDGEHOG","Spiny little mammal","Insectivore that rolls into a prickly ball"],
+    ["RACCOON","Masked nighttime raider","\"Trash panda\""],
+    ["SQUID","Ten-armed sea creature","Calamari source"],
+    ["BADGER","Burrower with a striped face","Pester persistently"],
+    ["MOOSE","Largest member of the deer family","What Europeans call an \"elk\""],
+    ["PANDA","Black-and-white bamboo eater","WWF logo animal"]
   ],
   "Science": [
-    ["ATOM","Basic unit of matter"],["GRAVITY","Force that keeps us on the ground"],["OXYGEN","Element O, needed for breathing"],
-    ["NEUTRON","Uncharged particle in a nucleus"],["MAGNET","It attracts iron"],["FOSSIL","Preserved remains of ancient life"],
-    ["GALAXY","The Milky Way, for one"],["ENZYME","Protein that speeds up reactions"],["PROTON","Positive particle in an atom"],
-    ["FRICTION","Force that resists sliding"],["CELL","Basic unit of life"],["NUCLEUS","Control center of a cell"],
-    ["PHOTON","Particle of light"],["MOLECULE","Two or more atoms bonded together"],["VELOCITY","Speed with a direction"],
-    ["ECLIPSE","When one celestial body blocks another"],["CRYSTAL","Solid with a repeating pattern, like quartz"],
-    ["HYDROGEN","Lightest element"],["GENOME","An organism's complete set of DNA"],["CLIMATE","Long-term weather patterns"],
-    ["ENERGY","The ability to do work"],["METEOR","Shooting star"]
+    ["ATOM","Basic unit of matter","Etymologically, \"uncuttable\""],
+    ["GRAVITY","Force that keeps us on the ground","Newton's apple illustrated it"],
+    ["OXYGEN","Element O, needed for breathing","Element number 8"],
+    ["NEUTRON","Uncharged particle in a nucleus","Chadwick discovered it in 1932"],
+    ["MAGNET","It attracts iron","Lodestone, essentially"],
+    ["FOSSIL","Preserved remains of ancient life","Paleontologist's find"],
+    ["GALAXY","The Milky Way, for one","Andromeda, for one"],
+    ["ENZYME","Protein that speeds up reactions","Biological catalyst"],
+    ["PROTON","Positive particle in an atom","Its count is the atomic number"],
+    ["FRICTION","Force that resists sliding","Why rubbing your hands warms them"],
+    ["CELL","Basic unit of life","Hooke named it after a monk's room"],
+    ["NUCLEUS","Control center of a cell","Where a eukaryote keeps its DNA"],
+    ["PHOTON","Particle of light","Quantum of electromagnetic radiation"],
+    ["MOLECULE","Two or more atoms bonded together","H2O, for one"],
+    ["VELOCITY","Speed with a direction","Displacement divided by time"],
+    ["ECLIPSE","When one celestial body blocks another","Event with a \"path of totality\""],
+    ["CRYSTAL","Solid with a repeating pattern, like quartz","Lattice-structured solid"],
+    ["HYDROGEN","Lightest element","Element number 1"],
+    ["GENOME","An organism's complete set of DNA","The Human ___ Project finished it in 2003"],
+    ["CLIMATE","Long-term weather patterns","Weather averaged over decades"],
+    ["ENERGY","The ability to do work","E in E = mc²"],
+    ["METEOR","Shooting star","Perseid, e.g."]
   ],
   "Geography": [
-    ["NILE","Longest river in Africa"],["SAHARA","Largest hot desert"],["EVEREST","Highest mountain on Earth"],
-    ["CANADA","Country north of the USA"],["TOKYO","Capital of Japan"],["AMAZON","South American river and rainforest"],
-    ["ISLAND","Land surrounded by water"],["EQUATOR","Imaginary line around Earth's middle"],["PACIFIC","Largest ocean"],
-    ["ALPS","European mountain range"],["DELTA","Landform at a river's mouth"],["PENINSULA","Land almost surrounded by water"],
-    ["CANYON","Deep gorge, like the Grand one"],["GLACIER","Slow-moving river of ice"],["TUNDRA","Cold, treeless biome"],
-    ["CAIRO","Capital of Egypt"],["PRAIRIE","Flat grassland"],["CONTINENT","Africa or Asia, e.g."],
-    ["LATITUDE","Lines parallel to the equator"],["MONSOON","Seasonal rainy wind"],["ATLAS","Book of maps"],["ROME","Italian capital"]
+    ["NILE","Longest river in Africa","River through Khartoum"],
+    ["SAHARA","Largest hot desert","Desert south of the Atlas Mountains"],
+    ["EVEREST","Highest mountain on Earth","Hillary and Norgay's 1953 peak"],
+    ["CANADA","Country north of the USA","Land of the maple leaf"],
+    ["TOKYO","Capital of Japan","City formerly called Edo"],
+    ["AMAZON","South American river and rainforest","River with the world's greatest flow"],
+    ["ISLAND","Land surrounded by water","Atoll, e.g."],
+    ["EQUATOR","Imaginary line around Earth's middle","0° latitude"],
+    ["PACIFIC","Largest ocean","Ocean of the Ring of Fire"],
+    ["ALPS","European mountain range","Matterhorn's range"],
+    ["DELTA","Landform at a river's mouth","The Mississippi ends in one"],
+    ["PENINSULA","Land almost surrounded by water","Florida or Italy, geographically"],
+    ["CANYON","Deep gorge, like the Grand one","Gorge"],
+    ["GLACIER","Slow-moving river of ice","It carves U-shaped valleys"],
+    ["TUNDRA","Cold, treeless biome","Permafrost biome"],
+    ["CAIRO","Capital of Egypt","City just east of Giza"],
+    ["PRAIRIE","Flat grassland","Great Plains grassland"],
+    ["CONTINENT","Africa or Asia, e.g.","One of seven"],
+    ["LATITUDE","Lines parallel to the equator","Horizontal map coordinate"],
+    ["MONSOON","Seasonal rainy wind","South Asian rainy season"],
+    ["ATLAS","Book of maps","Titan who holds up the sky"],
+    ["ROME","Italian capital","City of seven hills"]
   ],
   "Food": [
-    ["PIZZA","Cheesy pie from Naples"],["TACO","Folded tortilla dish"],["BAGEL","Ring-shaped bread roll"],
-    ["NOODLE","Long, thin strip of pasta"],["WAFFLE","Breakfast item with grid pockets"],["AVOCADO","Main ingredient in guacamole"],
-    ["PRETZEL","Twisted baked snack"],["CHEDDAR","Sharp English cheese"],["PANCAKE","Flat griddle breakfast cake"],
-    ["SUSHI","Japanese rice dish, often with fish"],["OMELET","Folded egg dish"],["BROCCOLI","Green vegetable like tiny trees"],
-    ["CINNAMON","Spice from tree bark"],["POPCORN","Movie theater snack"],["LEMON","Sour yellow citrus"],
-    ["MANGO","Tropical stone fruit"],["CUPCAKE","Small frosted cake"],["BURRITO","Wrapped tortilla meal"],
-    ["HONEY","Sweet stuff made by bees"],["GARLIC","Pungent bulb in many recipes"],["YOGURT","Cultured dairy snack"],
-    ["PEPPER","Salt's partner"]
+    ["PIZZA","Cheesy pie from Naples","Margherita, e.g."],
+    ["TACO","Folded tortilla dish","___ Tuesday"],
+    ["BAGEL","Ring-shaped bread roll","Lox holder"],
+    ["NOODLE","Long, thin strip of pasta","Use your ___ (think)"],
+    ["WAFFLE","Breakfast item with grid pockets","Be indecisive"],
+    ["AVOCADO","Main ingredient in guacamole","Alligator pear"],
+    ["PRETZEL","Twisted baked snack","Knotted snack"],
+    ["CHEDDAR","Sharp English cheese","Cheese named for a Somerset village"],
+    ["PANCAKE","Flat griddle breakfast cake","Flat as a ___"],
+    ["SUSHI","Japanese rice dish, often with fish","Nigiri or maki"],
+    ["OMELET","Folded egg dish","You can't make one without breaking eggs"],
+    ["BROCCOLI","Green vegetable like tiny trees","Floret-filled veggie"],
+    ["CINNAMON","Spice from tree bark","Snickerdoodle spice"],
+    ["POPCORN","Movie theater snack","Kernel's big moment"],
+    ["LEMON","Sour yellow citrus","Defective car"],
+    ["MANGO","Tropical stone fruit","Lassi flavor"],
+    ["CUPCAKE","Small frosted cake","Sweetie, as an endearment"],
+    ["BURRITO","Wrapped tortilla meal","\"Little donkey,\" in Spanish"],
+    ["HONEY","Sweet stuff made by bees","Sweetheart"],
+    ["GARLIC","Pungent bulb in many recipes","Vampire repellent"],
+    ["YOGURT","Cultured dairy snack","Greek ___"],
+    ["PEPPER","Salt's partner","Dr ___ (soda)"]
   ]
 };
-const TARGET_WORDS = 13;
+
+/* Difficulty levels
+   words   = how many words go into the grid
+   maxLen  = longest word allowed (shorter words = easier)
+   givens  = fraction of squares filled in for you at the start
+   lengths = show the answer length after each clue, e.g. (5)
+   hard    = use the trickier clues                                  */
+const DIFFS = {
+  easy:   { label: 'Easy',   words: 9,  maxLen: 7,  givens: 0.25, lengths: true,  hard: false },
+  medium: { label: 'Medium', words: 13, maxLen: 99, givens: 0,    lengths: true,  hard: false },
+  hard:   { label: 'Hard',   words: 18, maxLen: 99, givens: 0,    lengths: false, hard: true  }
+};
 
 /* ================= HELPERS ================= */
 const $ = s => document.querySelector(s);
@@ -360,6 +452,7 @@ const board = $('#board'), kbd = $('#kbd');
 let P = null, sol, user, mark, cellMap, cellEls, cur = { r: 0, c: 0, dir: 'across' };
 let done = false, wasFull = false, title = '';
 const timer = { start: 0, elapsed: 0, running: false, id: null };
+let diff = DIFFS[store.get('crossword-diff')] ? store.get('crossword-diff') : 'medium';
 let autoCheck = !!store.get('crossword-autocheck');
 $('#autoCheck').checked = autoCheck;
 
@@ -369,7 +462,10 @@ const key = (r, c) => r + ',' + c;
 function setup(puzzle, saved) {
   stopTimer();
   P = puzzle; title = puzzle.title || '';
-  $('#ptitle').textContent = title;
+  if (!DIFFS[P.diff]) P.diff = 'medium';
+  if (!Array.isArray(P.given)) P.given = [];
+  diff = P.diff; showDiff();
+  $('#ptitle').textContent = (title ? title + ' · ' : '') + DIFFS[P.diff].label;
   sol = grid2(null); cellMap = {};
   P.entries.forEach((e, idx) => {
     const [dr, dc] = DIRS[e.dir];
@@ -383,6 +479,7 @@ function setup(puzzle, saved) {
   });
   user = saved && saved.user ? saved.user : grid2('');
   mark = saved && saved.mark ? saved.mark : grid2('');
+  if (!saved) applyGivens();
   timer.elapsed = saved ? saved.elapsed || 0 : 0;
   done = saved ? !!saved.done : false;
   wasFull = isFull();
@@ -392,6 +489,29 @@ function setup(puzzle, saved) {
   cur = { r: first.r, c: first.c, dir: first.dir };
   showTime(); render(); save();
 }
+
+// Pre-filled "given" letters (Easy). They show in green and can't be changed.
+function applyGivens() {
+  for (const [r, c] of P.given) {
+    if (sol[r] && sol[r][c]) { user[r][c] = sol[r][c]; mark[r][c] = 'given'; }
+  }
+}
+function pickGivens(p, frac) {
+  if (!frac) return [];
+  const chosen = new Map(), all = new Map();
+  const cellsOf = e => Array.from(e.answer, (_, i) => e.dir === 'across' ? [e.r, e.c + i] : [e.r + i, e.c]);
+  for (const e of p.entries) for (const rc of cellsOf(e)) all.set(rc.join(','), rc);
+  // at least one free letter in every word
+  for (const e of shuffle(p.entries.slice())) {
+    const cells = cellsOf(e);
+    if (!cells.some(rc => chosen.has(rc.join(',')))) { const rc = cells[rand(cells.length)]; chosen.set(rc.join(','), rc); }
+  }
+  const want = Math.round(all.size * frac);
+  for (const [k, rc] of shuffle([...all])) { if (chosen.size >= want) break; chosen.set(k, rc); }
+  return [...chosen.values()];
+}
+const locked = (r, c) => mark[r][c] === 'given' || mark[r][c] === 'revealed';
+function clueLen(e) { return DIFFS[P.diff].lengths ? ' (' + e.answer.length + ')' : ''; }
 
 /* ================= BOARD ================= */
 function buildBoard() {
@@ -436,6 +556,7 @@ function buildClues() {
       const li = document.createElement('li'); li.dataset.i = i;
       li.innerHTML = '<b></b><span></span>';
       li.firstChild.textContent = e.num; li.lastChild.textContent = e.clue;
+      if (clueLen(e)) { const s = document.createElement('span'); s.className = 'len'; s.textContent = clueLen(e).trim(); li.lastChild.append(' ', s); }
       li.addEventListener('click', () => { gotoEntry(i); focusKbd(); });
       ol.appendChild(li); e.li = li;
     });
@@ -466,7 +587,7 @@ function render() {
   if (crossIdx !== undefined) scrollIntoList(P.entries[crossIdx].li);
   $('#clueText').innerHTML = '<b></b><span></span>';
   $('#clueText b').textContent = e.num + (e.dir === 'across' ? 'A' : 'D');
-  $('#clueText span').textContent = e.clue;
+  $('#clueText span').textContent = e.clue + clueLen(e);
 }
 function scrollIntoList(li) {
   const box = li.parentElement;
@@ -514,7 +635,7 @@ function arrow(dr, dc) {
 
 /* ================= EDITING ================= */
 function setCell(r, c, ch) {
-  if (mark[r][c] === 'revealed') return;
+  if (locked(r, c)) return;
   user[r][c] = ch;
   mark[r][c] = ch && autoCheck && ch !== sol[r][c] ? 'wrong' : '';
 }
@@ -523,17 +644,21 @@ function typeLetter(ch) {
   startTimer();
   setCell(cur.r, cur.c, ch);
   const e = curEntry(), i = posInEntry(e);
-  if (i < e.cells.length - 1) { [cur.r, cur.c] = e.cells[i + 1]; cur.dir = e.dir; }
+  let j = i + 1;
+  while (j < e.cells.length && locked(...e.cells[j])) j++; // hop over given/revealed letters
+  if (j < e.cells.length) { [cur.r, cur.c] = e.cells[j]; cur.dir = e.dir; }
   else if (e.cells.every(([r, c]) => user[r][c])) { afterChange(); return jumpClue(1); }
   afterChange();
 }
 function back() {
   if (done) return;
   const { r, c } = cur;
-  if (user[r][c] && mark[r][c] !== 'revealed') setCell(r, c, '');
+  if (user[r][c] && !locked(r, c)) setCell(r, c, '');
   else {
-    const e = curEntry(), i = posInEntry(e);
-    if (i > 0) { [cur.r, cur.c] = e.cells[i - 1]; cur.dir = e.dir; setCell(cur.r, cur.c, ''); }
+    const e = curEntry();
+    let j = posInEntry(e) - 1;
+    while (j >= 0 && locked(...e.cells[j])) j--;
+    if (j >= 0) { [cur.r, cur.c] = e.cells[j]; cur.dir = e.dir; setCell(cur.r, cur.c, ''); }
   }
   afterChange();
 }
@@ -564,7 +689,7 @@ function reveal(scope) {
 }
 function clearAll() {
   if (!confirm('Clear all your answers?')) return;
-  user = grid2(''); mark = grid2('');
+  user = grid2(''); mark = grid2(''); applyGivens();
   done = false; wasFull = false; board.classList.remove('solved');
   stopTimer(); timer.elapsed = 0; showTime();
   render(); save();
@@ -606,7 +731,7 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ================= SAVE / SHARE ================= */
-const strip = p => ({ title: p.title || '', rows: p.rows, cols: p.cols, entries: p.entries.map(e => ({ answer: e.answer, clue: e.clue, r: e.r, c: e.c, dir: e.dir, num: e.num })) });
+const strip = p => ({ title: p.title || '', diff: p.diff, given: p.given || [], rows: p.rows, cols: p.cols, entries: p.entries.map(e => ({ answer: e.answer, clue: e.clue, r: e.r, c: e.c, dir: e.dir, num: e.num })) });
 function save() { if (P) store.set(SAVE_KEY, { puzzle: strip(P), user, mark, elapsed: timer.elapsed, done }); }
 
 function enc(obj) {
@@ -618,11 +743,13 @@ function dec(str) {
   const s = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(s, ch => ch.charCodeAt(0))));
 }
-const shareCode = p => enc({ t: p.title || '', e: p.entries.map(e => [e.answer, e.clue, e.r, e.c, e.dir === 'down' ? 1 : 0]) });
+const shareCode = p => enc({ t: p.title || '', d: p.diff, g: p.given || [], e: p.entries.map(e => [e.answer, e.clue, e.r, e.c, e.dir === 'down' ? 1 : 0]) });
 function fromShare(code) {
   const o = dec(code);
   const list = o.e.map(([a, cl, r, c, d]) => ({ answer: clean(a), clue: String(cl), r: +r, c: +c, dir: d ? 'down' : 'across' }));
   const p = normalize(list); p.title = String(o.t || 'Shared puzzle');
+  p.diff = DIFFS[o.d] ? o.d : 'medium';
+  p.given = Array.isArray(o.g) ? o.g.filter(g => Array.isArray(g) && g.length === 2).map(([r, c]) => [+r, +c]) : [];
   // validate: crossing letters must agree
   const seen = {};
   for (const e of p.entries) {
@@ -649,17 +776,35 @@ packSel.value = store.get('crossword-pack') || Object.keys(PACKS)[0];
 packSel.addEventListener('change', () => { store.set('crossword-pack', packSel.value); newPuzzle(); });
 
 function newPuzzle() {
-  const name = packSel.value;
-  const entries = PACKS[name].map(([a, c]) => ({ answer: clean(a), clue: c }));
-  const p = generate(entries, TARGET_WORDS); p.title = name;
+  const name = packSel.value, D = DIFFS[diff];
+  let entries = PACKS[name].map(([a, c, h]) => ({ answer: clean(a), clue: D.hard && h ? h : c }));
+  const short = entries.filter(e => e.answer.length <= D.maxLen);
+  if (short.length >= D.words + 3) entries = short;
+  const p = generate(entries, D.words); p.title = name; p.diff = diff;
+  p.given = pickGivens(p, D.givens);
   history.replaceState(null, '', location.pathname + location.search);
   closeModals();
   setup(p, null);
 }
+const hasProgress = () => P && !done && user.some((row, r) => row.some((v, c) => v && mark[r][c] !== 'given'));
 $('#newBtn').addEventListener('click', () => {
-  if (P && !done && user.some(row => row.some(Boolean)) && !confirm('Start a new puzzle? Your progress on this one will be lost.')) return;
+  if (hasProgress() && !confirm('Start a new puzzle? Your progress on this one will be lost.')) return;
   newPuzzle();
 });
+
+function showDiff() {
+  document.querySelectorAll('#diffSeg button').forEach(b => {
+    b.classList.toggle('on', b.dataset.diff === diff);
+    b.setAttribute('aria-pressed', b.dataset.diff === diff);
+  });
+}
+document.querySelectorAll('#diffSeg button').forEach(b => b.addEventListener('click', () => {
+  if (b.dataset.diff === (P && P.diff)) return;
+  if (hasProgress() && !confirm('Switch difficulty? This starts a new puzzle and your progress will be lost.')) return;
+  diff = b.dataset.diff; store.set('crossword-diff', diff);
+  newPuzzle();
+}));
+showDiff();
 $('#doneNew').addEventListener('click', newPuzzle);
 
 $('#customBtn').addEventListener('click', () => openModal('#customModal'));
@@ -675,6 +820,7 @@ $('#buildCustom').addEventListener('click', () => {
   if (entries.length < 3) { toast('Add at least 3 lines like  ANSWER: clue'); return; }
   const p = generate(entries, entries.length, 120);
   p.title = $('#customTitle').value.trim() || 'Custom puzzle';
+  p.diff = diff; p.given = pickGivens(p, DIFFS[diff].givens);
   const missing = entries.filter(e => !p.entries.some(x => x.answer === e.answer)).map(e => e.answer);
   history.replaceState(null, '', location.pathname + location.search);
   closeModals(); setup(p, null);
