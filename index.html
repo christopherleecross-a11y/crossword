@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crossword</title>
+<style>
+:root{
+  --bg:#f4f1ea; --panel:#ffffff; --ink:#1d1d1f; --muted:#6b6b70; --line:#1d1d1f;
+  --cell:#ffffff; --sel:#ffd84d; --word:#cfe3ff; --cross:#eef4ff;
+  --wrong:#d93025; --revealed:#7a4cc2; --accent:#2457d6; --accent-ink:#fff;
+  --shadow:0 1px 3px rgba(0,0,0,.08),0 4px 16px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#141416; --panel:#1f1f23; --ink:#ececf0; --muted:#9a9aa2; --line:#6a6a72;
+    --cell:#2a2a30; --sel:#a8841a; --word:#2c4469; --cross:#252b36;
+    --wrong:#ff6b5e; --revealed:#b794f6; --accent:#6d93ff; --accent-ink:#0f1020;
+    --shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.4}
+button,select,input,textarea{font:inherit;color:inherit}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+
+header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+h1{margin:0;font-size:1.6rem;letter-spacing:-.02em}
+#ptitle{display:block;font-size:.9rem;font-weight:500;color:var(--muted);letter-spacing:0}
+.controls,.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.toolbar{background:var(--panel);box-shadow:var(--shadow);border-radius:12px;padding:8px 10px;margin-bottom:12px}
+.toolbar .spacer{flex:1}
+#timer{font-variant-numeric:tabular-nums;font-weight:600;min-width:3.5em}
+
+.btn,select{background:var(--panel);border:1px solid color-mix(in srgb,var(--ink) 18%,transparent);border-radius:8px;padding:6px 12px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+label.toggle{display:flex;align-items:center;gap:6px;font-size:.9rem;cursor:pointer;user-select:none}
+
+details.menu{position:relative}
+details.menu summary{list-style:none}
+details.menu summary::-webkit-details-marker{display:none}
+details.menu .items{position:absolute;top:calc(100% + 4px);left:0;z-index:20;background:var(--panel);box-shadow:var(--shadow);border-radius:10px;padding:4px;display:flex;flex-direction:column;min-width:130px;border:1px solid color-mix(in srgb,var(--ink) 12%,transparent)}
+details.menu .items button{background:none;border:0;text-align:left;padding:8px 10px;border-radius:6px;cursor:pointer}
+details.menu .items button:hover{background:var(--word)}
+
+main{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.play{flex:1 1 440px;min-width:0;position:relative}
+.cluebar{position:sticky;top:0;z-index:10;display:flex;align-items:stretch;gap:6px;background:var(--word);border-radius:10px;margin-bottom:10px;min-height:52px}
+.cluebar button{background:none;border:0;font-size:1.5rem;padding:0 12px;cursor:pointer;color:var(--ink)}
+#clueText{flex:1;display:flex;align-items:center;padding:8px 2px;cursor:pointer;font-size:1rem}
+#clueText b{margin-right:8px;white-space:nowrap}
+
+#boardWrap{position:relative;width:100%;display:flex;justify-content:center}
+#board{display:grid;grid-template-columns:repeat(var(--cols),var(--cs));grid-auto-rows:var(--cs);padding:0 1px 1px 0;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.cell{position:relative;background:var(--cell);border:1px solid var(--line);margin:0 -1px -1px 0;cursor:pointer}
+.cell.empty{background:transparent;border-color:transparent;cursor:default}
+.cell.inword{background:var(--word)}
+.cell.sel{background:var(--sel);z-index:1}
+.cell .num{position:absolute;top:1px;left:2px;font-size:calc(var(--cs) * .27);line-height:1;color:var(--muted);pointer-events:none}
+.cell .ltr{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;padding-bottom:calc(var(--cs) * .07);font-size:calc(var(--cs) * .58);font-weight:600;line-height:1;pointer-events:none}
+.cell.wrong .ltr{color:var(--wrong)}
+.cell.wrong::before{content:"";position:absolute;inset:0;background:linear-gradient(to top right,transparent calc(50% - 1px),var(--wrong) 50%,transparent calc(50% + 1px));opacity:.55;pointer-events:none}
+.cell.revealed .ltr{color:var(--revealed)}
+.cell.revealed::after{content:"";position:absolute;top:0;right:0;border-style:solid;border-width:0 calc(var(--cs) * .28) calc(var(--cs) * .28) 0;border-color:transparent var(--revealed) transparent transparent}
+#board.solved .cell:not(.empty){animation:pop .5s ease both}
+@keyframes pop{50%{transform:scale(1.08)}}
+
+#kbd{position:absolute;top:0;left:50%;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;pointer-events:none}
+
+aside.clues{flex:1 1 300px;display:grid;grid-template-columns:1fr 1fr;gap:12px;min-width:0}
+.clues section{background:var(--panel);box-shadow:var(--shadow);border-radius:12px;padding:10px 6px 10px 12px;min-width:0}
+.clues h2{margin:0 0 6px;font-size:.8rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.clues ol{list-style:none;margin:0;padding:0 6px 0 0;max-height:62vh;overflow:auto;position:relative}
+.clues li{display:flex;gap:8px;padding:6px 8px;border-radius:6px;cursor:pointer;border-left:3px solid transparent}
+.clues li b{min-width:1.4em;text-align:right}
+.clues li:hover{background:var(--cross)}
+.clues li.cross{background:var(--cross);border-left-color:var(--word)}
+.clues li.active{background:var(--word);border-left-color:var(--accent)}
+.clues li.filled{color:var(--muted)}
+@media (max-width:760px){
+  .wrap{padding:10px}
+  aside.clues{grid-template-columns:1fr}
+  .clues ol{max-height:none;overflow:visible}
+  h1{font-size:1.3rem}
+}
+
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+.modal.open{display:flex}
+.dialog{background:var(--panel);border-radius:14px;box-shadow:var(--shadow);padding:20px;width:min(560px,100%);max-height:90vh;overflow:auto}
+.dialog h3{margin:0 0 8px}
+.dialog p{margin:0 0 12px;color:var(--muted);font-size:.92rem}
+.dialog input[type=text],.dialog textarea{width:100%;background:var(--bg);border:1px solid color-mix(in srgb,var(--ink) 20%,transparent);border-radius:8px;padding:8px 10px;margin-bottom:10px}
+.dialog textarea{min-height:220px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.88rem}
+.dialog .row{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.big{font-size:2.2rem;font-weight:700;text-align:center;margin:6px 0 2px}
+.center{text-align:center}
+
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;z-index:60;max-width:90vw;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Crossword <span id="ptitle"></span></h1>
+    <div class="controls">
+      <select id="packSelect" aria-label="Puzzle theme"></select>
+      <button class="btn primary" id="newBtn">New puzzle</button>
+      <button class="btn" id="customBtn">Make your own</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <span id="timer">0:00</span>
+    <details class="menu"><summary class="btn">Check ▾</summary>
+      <div class="items">
+        <button data-check="cell">Letter</button>
+        <button data-check="word">Word</button>
+        <button data-check="all">Puzzle</button>
+      </div>
+    </details>
+    <details class="menu"><summary class="btn">Reveal ▾</summary>
+      <div class="items">
+        <button data-reveal="cell">Letter</button>
+        <button data-reveal="word">Word</button>
+        <button data-reveal="all">Puzzle</button>
+      </div>
+    </details>
+    <button class="btn" id="clearBtn">Clear</button>
+    <label class="toggle"><input type="checkbox" id="autoCheck"> Auto-check</label>
+    <span class="spacer"></span>
+    <button class="btn" id="shareBtn">Copy share link</button>
+  </div>
+
+  <main>
+    <div class="play">
+      <div class="cluebar">
+        <button id="prevClue" aria-label="Previous clue">‹</button>
+        <div id="clueText" title="Tap to switch direction"></div>
+        <button id="nextClue" aria-label="Next clue">›</button>
+      </div>
+      <div id="boardWrap">
+        <div id="board" role="grid" aria-label="Crossword grid"></div>
+        <input id="kbd" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" aria-label="Type answers">
+      </div>
+    </div>
+    <aside class="clues">
+      <section><h2>Across</h2><ol id="acrossList"></ol></section>
+      <section><h2>Down</h2><ol id="downList"></ol></section>
+    </aside>
+  </main>
+</div>
+
+<div class="modal" id="customModal">
+  <div class="dialog">
+    <h3>Make your own crossword</h3>
+    <p>One entry per line: <b>ANSWER: clue</b> (you can also use <b>=</b>, <b> - </b>, or a tab). Spaces and punctuation in answers are ignored. 8–20 words works best. Use “Copy share link” afterward to send it to anyone.</p>
+    <input type="text" id="customTitle" placeholder="Puzzle title (optional)">
+    <textarea id="customWords" placeholder="photosynthesis: How plants turn light into food
+mitochondria: Powerhouse of the cell
+nucleus: Control center of the cell
+osmosis: Movement of water across a membrane"></textarea>
+    <div class="row">
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" id="buildCustom">Build puzzle</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="doneModal">
+  <div class="dialog center">
+    <h3>🎉 Solved!</h3>
+    <div class="big" id="doneTime">0:00</div>
+    <p id="doneNote"></p>
+    <div class="row" style="justify-content:center">
+      <button class="btn" data-close>Admire grid</button>
+      <button class="btn primary" id="doneNew">New puzzle</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ================= WORD PACKS ================= */
+const PACKS = {
+  "General Knowledge": [
+    ["OCEAN","Large body of salt water"],["PIANO","Instrument with 88 keys"],["LIBRARY","Place to borrow books"],
+    ["CASTLE","Fortified medieval home"],["RAINBOW","Arc of colors after a storm"],["VOLCANO","Mountain that may erupt"],
+    ["COMPASS","Tool that points north"],["LANTERN","Portable light with a handle"],["WHISPER","Speak very softly"],
+    ["PUZZLE","Something to solve, like this!"],["HARBOR","Sheltered place for ships"],["JUNGLE","Dense tropical forest"],
+    ["TICKET","Pass for a concert or train"],["BLANKET","Cozy bed covering"],["MIRROR","Reflective glass"],
+    ["ANCHOR","Keeps a ship in place"],["THUNDER","Sound that follows lightning"],["CANDLE","Wax light with a wick"],
+    ["GARDEN","Place to grow flowers"],["ORBIT","Path around a planet"],["KETTLE","Pot for boiling water"],
+    ["SUMMIT","Top of a mountain"]
+  ],
+  "Animals": [
+    ["GIRAFFE","Tallest land animal"],["PENGUIN","Flightless bird of Antarctica"],["DOLPHIN","Clever marine mammal that clicks and whistles"],
+    ["OCTOPUS","Eight-armed sea creature"],["CHEETAH","Fastest land animal"],["TORTOISE","Slow, shelled land reptile"],
+    ["KANGAROO","Australian hopper with a pouch"],["OWL","Nocturnal bird that hoots"],["BEAVER","Dam-building rodent"],
+    ["ZEBRA","Striped African grazer"],["EAGLE","Bald national bird of the USA"],["CAMEL","Desert animal with humps"],
+    ["WALRUS","Tusked Arctic mammal"],["SALMON","Fish that swims upstream to spawn"],["LOBSTER","Clawed crustacean"],
+    ["FLAMINGO","Pink wading bird"],["HEDGEHOG","Spiny little mammal"],["RACCOON","Masked nighttime raider"],
+    ["SQUID","Ten-armed sea creature"],["BADGER","Burrower with a striped face"],["MOOSE","Largest member of the deer family"],
+    ["PANDA","Black-and-white bamboo eater"]
+  ],
+  "Science": [
+    ["ATOM","Basic unit of matter"],["GRAVITY","Force that keeps us on the ground"],["OXYGEN","Element O, needed for breathing"],
+    ["NEUTRON","Uncharged particle in a nucleus"],["MAGNET","It attracts iron"],["FOSSIL","Preserved remains of ancient life"],
+    ["GALAXY","The Milky Way, for one"],["ENZYME","Protein that speeds up reactions"],["PROTON","Positive particle in an atom"],
+    ["FRICTION","Force that resists sliding"],["CELL","Basic unit of life"],["NUCLEUS","Control center of a cell"],
+    ["PHOTON","Particle of light"],["MOLECULE","Two or more atoms bonded together"],["VELOCITY","Speed with a direction"],
+    ["ECLIPSE","When one celestial body blocks another"],["CRYSTAL","Solid with a repeating pattern, like quartz"],
+    ["HYDROGEN","Lightest element"],["GENOME","An organism's complete set of DNA"],["CLIMATE","Long-term weather patterns"],
+    ["ENERGY","The ability to do work"],["METEOR","Shooting star"]
+  ],
+  "Geography": [
+    ["NILE","Longest river in Africa"],["SAHARA","Largest hot desert"],["EVEREST","Highest mountain on Earth"],
+    ["CANADA","Country north of the USA"],["TOKYO","Capital of Japan"],["AMAZON","South American river and rainforest"],
+    ["ISLAND","Land surrounded by water"],["EQUATOR","Imaginary line around Earth's middle"],["PACIFIC","Largest ocean"],
+    ["ALPS","European mountain range"],["DELTA","Landform at a river's mouth"],["PENINSULA","Land almost surrounded by water"],
+    ["CANYON","Deep gorge, like the Grand one"],["GLACIER","Slow-moving river of ice"],["TUNDRA","Cold, treeless biome"],
+    ["CAIRO","Capital of Egypt"],["PRAIRIE","Flat grassland"],["CONTINENT","Africa or Asia, e.g."],
+    ["LATITUDE","Lines parallel to the equator"],["MONSOON","Seasonal rainy wind"],["ATLAS","Book of maps"],["ROME","Italian capital"]
+  ],
+  "Food": [
+    ["PIZZA","Cheesy pie from Naples"],["TACO","Folded tortilla dish"],["BAGEL","Ring-shaped bread roll"],
+    ["NOODLE","Long, thin strip of pasta"],["WAFFLE","Breakfast item with grid pockets"],["AVOCADO","Main ingredient in guacamole"],
+    ["PRETZEL","Twisted baked snack"],["CHEDDAR","Sharp English cheese"],["PANCAKE","Flat griddle breakfast cake"],
+    ["SUSHI","Japanese rice dish, often with fish"],["OMELET","Folded egg dish"],["BROCCOLI","Green vegetable like tiny trees"],
+    ["CINNAMON","Spice from tree bark"],["POPCORN","Movie theater snack"],["LEMON","Sour yellow citrus"],
+    ["MANGO","Tropical stone fruit"],["CUPCAKE","Small frosted cake"],["BURRITO","Wrapped tortilla meal"],
+    ["HONEY","Sweet stuff made by bees"],["GARLIC","Pungent bulb in many recipes"],["YOGURT","Cultured dairy snack"],
+    ["PEPPER","Salt's partner"]
+  ]
+};
+const TARGET_WORDS = 13;
+
+/* ================= HELPERS ================= */
+const $ = s => document.querySelector(s);
+const rand = n => Math.floor(Math.random() * n);
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = rand(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const clean = s => String(s).toUpperCase().replace(/[^A-Z]/g, '');
+const fmtTime = s => { const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+};
+function toast(msg, ms = 2400) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast.id); toast.id = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+/* ================= GENERATOR ================= */
+// GEN-START
+const DIRS = { across: [0, 1], down: [1, 0] };
+
+function buildOnce(pool, target) {
+  const grid = new Map(), placed = [];
+  const K = (r, c) => r + ',' + c, get = (r, c) => grid.get(K(r, c));
+  let minR = 0, maxR = 0, minC = 0, maxC = 0;
+
+  function fit(w, r, c, dir) {
+    const [dr, dc] = DIRS[dir];
+    if (get(r - dr, c - dc) || get(r + dr * w.length, c + dc * w.length)) return -1;
+    let crosses = 0;
+    for (let i = 0; i < w.length; i++) {
+      const rr = r + dr * i, cc = c + dc * i, cell = get(rr, cc);
+      if (cell) {
+        if (cell.ch !== w[i] || cell[dir]) return -1;
+        crosses++;
+      } else if (get(rr + dc, cc + dr) || get(rr - dc, cc - dr)) {
+        return -1; // would touch a parallel neighbor
+      }
+    }
+    return crosses;
+  }
+  function put(e, r, c, dir) {
+    const [dr, dc] = DIRS[dir], L = e.answer.length;
+    for (let i = 0; i < L; i++) {
+      const k = K(r + dr * i, c + dc * i);
+      const cell = grid.get(k) || { ch: e.answer[i], across: false, down: false };
+      cell[dir] = true; grid.set(k, cell);
+    }
+    minR = Math.min(minR, r); maxR = Math.max(maxR, r + dr * (L - 1));
+    minC = Math.min(minC, c); maxC = Math.max(maxC, c + dc * (L - 1));
+    placed.push({ answer: e.answer, clue: e.clue, r, c, dir });
+  }
+
+  put(pool[0], 0, 0, Math.random() < 0.5 ? 'across' : 'down');
+  let remaining = pool.slice(1);
+  for (let pass = 0; pass < 2 && placed.length < target; pass++) {
+    const left = [];
+    for (const e of remaining) {
+      if (placed.length >= target) break;
+      const w = e.answer;
+      let best = null, bestScore = -Infinity;
+      for (const [k, cell] of grid) {
+        const [r0, c0] = k.split(',').map(Number);
+        for (let i = 0; i < w.length; i++) {
+          if (w[i] !== cell.ch) continue;
+          for (const dir of ['across', 'down']) {
+            if (cell[dir]) continue;
+            const [dr, dc] = DIRS[dir], r = r0 - dr * i, c = c0 - dc * i;
+            const x = fit(w, r, c, dir);
+            if (x < 1) continue;
+            const er = r + dr * (w.length - 1), ec = c + dc * (w.length - 1);
+            const h = Math.max(maxR, er) - Math.min(minR, r) + 1;
+            const wd = Math.max(maxC, ec) - Math.min(minC, c) + 1;
+            const s = x * 12 - h * wd * 0.15 - Math.abs(h - wd) * 1.5 + Math.random() * 3;
+            if (s > bestScore) { bestScore = s; best = { r, c, dir }; }
+          }
+        }
+      }
+      if (best) put(e, best.r, best.c, best.dir); else left.push(e);
+    }
+    remaining = left;
+  }
+  return { placed, minR, maxR, minC, maxC };
+}
+
+function generate(entries, target, tries = 60) {
+  let best = null, bestScore = -Infinity;
+  for (let t = 0; t < tries; t++) {
+    const pool = shuffle(entries.slice())
+      .map(e => ({ ...e, k: e.answer.length + Math.random() * 4 }))
+      .sort((a, b) => b.k - a.k);
+    const L = buildOnce(pool, target);
+    const h = L.maxR - L.minR + 1, w = L.maxC - L.minC + 1;
+    const s = L.placed.length * 100 - h * w * 0.3 - Math.abs(h - w) * 4;
+    if (s > bestScore) { bestScore = s; best = L; }
+  }
+  return normalize(best.placed.map(p => ({ ...p, r: p.r - best.minR, c: p.c - best.minC })));
+}
+
+function normalize(list) {
+  let rows = 0, cols = 0;
+  for (const p of list) {
+    const L = p.answer.length;
+    rows = Math.max(rows, p.r + (p.dir === 'down' ? L : 1));
+    cols = Math.max(cols, p.c + (p.dir === 'across' ? L : 1));
+  }
+  const starts = [...new Set(list.map(p => p.r * 1000 + p.c))].sort((a, b) => a - b);
+  const numOf = new Map(starts.map((s, i) => [s, i + 1]));
+  const entries = list
+    .map(p => ({ answer: p.answer, clue: p.clue, r: p.r, c: p.c, dir: p.dir, num: numOf.get(p.r * 1000 + p.c) }))
+    .sort((a, b) => a.dir === b.dir ? a.num - b.num : (a.dir === 'across' ? -1 : 1));
+  return { rows, cols, entries };
+}
+// GEN-END
+
+/* ================= STATE ================= */
+const SAVE_KEY = 'crossword-state-v1';
+const board = $('#board'), kbd = $('#kbd');
+let P = null, sol, user, mark, cellMap, cellEls, cur = { r: 0, c: 0, dir: 'across' };
+let done = false, wasFull = false, title = '';
+const timer = { start: 0, elapsed: 0, running: false, id: null };
+let autoCheck = !!store.get('crossword-autocheck');
+$('#autoCheck').checked = autoCheck;
+
+const grid2 = v => Array.from({ length: P.rows }, () => Array(P.cols).fill(v));
+const key = (r, c) => r + ',' + c;
+
+function setup(puzzle, saved) {
+  stopTimer();
+  P = puzzle; title = puzzle.title || '';
+  $('#ptitle').textContent = title;
+  sol = grid2(null); cellMap = {};
+  P.entries.forEach((e, idx) => {
+    const [dr, dc] = DIRS[e.dir];
+    e.cells = [];
+    for (let i = 0; i < e.answer.length; i++) {
+      const r = e.r + dr * i, c = e.c + dc * i;
+      sol[r][c] = e.answer[i];
+      e.cells.push([r, c]);
+      (cellMap[key(r, c)] = cellMap[key(r, c)] || {})[e.dir] = idx;
+    }
+  });
+  user = saved && saved.user ? saved.user : grid2('');
+  mark = saved && saved.mark ? saved.mark : grid2('');
+  timer.elapsed = saved ? saved.elapsed || 0 : 0;
+  done = saved ? !!saved.done : false;
+  wasFull = isFull();
+  board.classList.remove('solved');
+  buildBoard(); buildClues();
+  const first = P.entries[0];
+  cur = { r: first.r, c: first.c, dir: first.dir };
+  showTime(); render(); save();
+}
+
+/* ================= BOARD ================= */
+function buildBoard() {
+  board.innerHTML = '';
+  board.style.setProperty('--cols', P.cols);
+  cellEls = grid2(null);
+  const nums = {};
+  P.entries.forEach(e => nums[key(e.r, e.c)] = e.num);
+  const frag = document.createDocumentFragment();
+  for (let r = 0; r < P.rows; r++) for (let c = 0; c < P.cols; c++) {
+    const d = document.createElement('div');
+    if (!sol[r][c]) { d.className = 'cell empty'; frag.appendChild(d); continue; }
+    d.className = 'cell'; d.dataset.r = r; d.dataset.c = c;
+    if (nums[key(r, c)]) { const n = document.createElement('span'); n.className = 'num'; n.textContent = nums[key(r, c)]; d.appendChild(n); }
+    const l = document.createElement('span'); l.className = 'ltr'; d.appendChild(l); d.ltr = l;
+    cellEls[r][c] = d; frag.appendChild(d);
+  }
+  board.appendChild(frag);
+  sizeBoard();
+}
+function sizeBoard() {
+  if (!P) return;
+  const w = $('#boardWrap').clientWidth - 2;
+  const cs = Math.max(20, Math.min(46, Math.floor(w / P.cols)));
+  board.style.setProperty('--cs', cs + 'px');
+}
+window.addEventListener('resize', sizeBoard);
+
+board.addEventListener('click', ev => {
+  const el = ev.target.closest('.cell'); if (!el || el.classList.contains('empty')) return;
+  const r = +el.dataset.r, c = +el.dataset.c;
+  if (r === cur.r && c === cur.c) toggleDir();
+  else select(r, c, cur.dir);
+  focusKbd();
+});
+
+function buildClues() {
+  for (const dir of ['across', 'down']) {
+    const ol = $('#' + dir + 'List'); ol.innerHTML = '';
+    P.entries.forEach((e, i) => {
+      if (e.dir !== dir) return;
+      const li = document.createElement('li'); li.dataset.i = i;
+      li.innerHTML = '<b></b><span></span>';
+      li.firstChild.textContent = e.num; li.lastChild.textContent = e.clue;
+      li.addEventListener('click', () => { gotoEntry(i); focusKbd(); });
+      ol.appendChild(li); e.li = li;
+    });
+  }
+}
+
+/* ================= RENDER ================= */
+const curEntryIdx = () => { const m = cellMap[key(cur.r, cur.c)]; return m[cur.dir] !== undefined ? m[cur.dir] : m[cur.dir === 'across' ? 'down' : 'across']; };
+const curEntry = () => P.entries[curEntryIdx()];
+const posInEntry = e => e.cells.findIndex(([r, c]) => r === cur.r && c === cur.c);
+
+function render() {
+  const e = curEntry();
+  const inword = new Set(e.cells.map(([r, c]) => key(r, c)));
+  for (let r = 0; r < P.rows; r++) for (let c = 0; c < P.cols; c++) {
+    const el = cellEls[r][c]; if (!el) continue;
+    let cls = 'cell';
+    if (r === cur.r && c === cur.c) cls += ' sel'; else if (inword.has(key(r, c))) cls += ' inword';
+    if (mark[r][c]) cls += ' ' + mark[r][c];
+    el.className = cls; el.ltr.textContent = user[r][c];
+  }
+  const m = cellMap[key(cur.r, cur.c)];
+  const crossIdx = m[e.dir === 'across' ? 'down' : 'across'];
+  P.entries.forEach((x, i) => {
+    x.li.className = (x === e ? 'active' : i === crossIdx ? 'cross' : '') + (x.cells.every(([r, c]) => user[r][c]) ? ' filled' : '');
+  });
+  scrollIntoList(e.li);
+  if (crossIdx !== undefined) scrollIntoList(P.entries[crossIdx].li);
+  $('#clueText').innerHTML = '<b></b><span></span>';
+  $('#clueText b').textContent = e.num + (e.dir === 'across' ? 'A' : 'D');
+  $('#clueText span').textContent = e.clue;
+}
+function scrollIntoList(li) {
+  const box = li.parentElement;
+  if (box.scrollHeight <= box.clientHeight) return;
+  const top = li.offsetTop, bottom = top + li.offsetHeight;
+  if (top < box.scrollTop) box.scrollTop = top - 4;
+  else if (bottom > box.scrollTop + box.clientHeight) box.scrollTop = bottom - box.clientHeight + 4;
+}
+
+/* ================= NAVIGATION ================= */
+function select(r, c, dir) {
+  const m = cellMap[key(r, c)]; if (!m) return;
+  cur = { r, c, dir: m[dir] !== undefined ? dir : (dir === 'across' ? 'down' : 'across') };
+  render();
+}
+function toggleDir() {
+  const other = cur.dir === 'across' ? 'down' : 'across';
+  if (cellMap[key(cur.r, cur.c)][other] !== undefined) { cur.dir = other; render(); }
+}
+function gotoEntry(i) {
+  const e = P.entries[i];
+  const empty = e.cells.find(([r, c]) => !user[r][c]) || e.cells[0];
+  cur = { r: empty[0], c: empty[1], dir: e.dir };
+  render();
+}
+function jumpClue(step) {
+  const n = P.entries.length;
+  let i = curEntryIdx();
+  // prefer unfilled clues
+  for (let k = 1; k <= n; k++) {
+    const j = ((i + step * k) % n + n) % n;
+    if (P.entries[j].cells.some(([r, c]) => !user[r][c])) return gotoEntry(j);
+  }
+  gotoEntry(((i + step) % n + n) % n);
+}
+function arrow(dr, dc) {
+  const dir = dr ? 'down' : 'across';
+  if (cur.dir !== dir && cellMap[key(cur.r, cur.c)][dir] !== undefined) { cur.dir = dir; render(); return; }
+  let r = cur.r + dr, c = cur.c + dc;
+  while (r >= 0 && r < P.rows && c >= 0 && c < P.cols) {
+    if (sol[r][c]) return select(r, c, dir);
+    r += dr; c += dc;
+  }
+}
+
+/* ================= EDITING ================= */
+function setCell(r, c, ch) {
+  if (mark[r][c] === 'revealed') return;
+  user[r][c] = ch;
+  mark[r][c] = ch && autoCheck && ch !== sol[r][c] ? 'wrong' : '';
+}
+function typeLetter(ch) {
+  if (done) return;
+  startTimer();
+  setCell(cur.r, cur.c, ch);
+  const e = curEntry(), i = posInEntry(e);
+  if (i < e.cells.length - 1) { [cur.r, cur.c] = e.cells[i + 1]; cur.dir = e.dir; }
+  else if (e.cells.every(([r, c]) => user[r][c])) { afterChange(); return jumpClue(1); }
+  afterChange();
+}
+function back() {
+  if (done) return;
+  const { r, c } = cur;
+  if (user[r][c] && mark[r][c] !== 'revealed') setCell(r, c, '');
+  else {
+    const e = curEntry(), i = posInEntry(e);
+    if (i > 0) { [cur.r, cur.c] = e.cells[i - 1]; cur.dir = e.dir; setCell(cur.r, cur.c, ''); }
+  }
+  afterChange();
+}
+function afterChange() { render(); save(); checkComplete(); }
+
+function cellsFor(scope) {
+  if (scope === 'cell') return [[cur.r, cur.c]];
+  if (scope === 'word') return curEntry().cells;
+  const all = [];
+  for (let r = 0; r < P.rows; r++) for (let c = 0; c < P.cols; c++) if (sol[r][c]) all.push([r, c]);
+  return all;
+}
+function check(scope) {
+  let wrong = 0, empty = 0;
+  for (const [r, c] of cellsFor(scope)) {
+    if (!user[r][c]) empty++;
+    else if (user[r][c] !== sol[r][c]) { mark[r][c] = 'wrong'; wrong++; }
+  }
+  afterChange();
+  toast(wrong ? `${wrong} incorrect ${wrong === 1 ? 'letter' : 'letters'} marked` : empty ? 'No mistakes so far!' : 'All correct!');
+}
+function reveal(scope) {
+  if (scope === 'all' && !confirm('Reveal the whole puzzle?')) return;
+  for (const [r, c] of cellsFor(scope)) {
+    if (user[r][c] !== sol[r][c]) { user[r][c] = sol[r][c]; mark[r][c] = 'revealed'; }
+  }
+  afterChange();
+}
+function clearAll() {
+  if (!confirm('Clear all your answers?')) return;
+  user = grid2(''); mark = grid2('');
+  done = false; wasFull = false; board.classList.remove('solved');
+  stopTimer(); timer.elapsed = 0; showTime();
+  render(); save();
+}
+
+const isFull = () => { for (let r = 0; r < P.rows; r++) for (let c = 0; c < P.cols; c++) if (sol[r][c] && !user[r][c]) return false; return true; };
+function checkComplete() {
+  if (done) return;
+  const full = isFull();
+  if (full && !wasFull) {
+    let ok = true;
+    for (let r = 0; r < P.rows && ok; r++) for (let c = 0; c < P.cols; c++) if (sol[r][c] && user[r][c] !== sol[r][c]) { ok = false; break; }
+    if (ok) {
+      done = true; stopTimer(); save();
+      board.classList.add('solved');
+      const revealed = mark.some(row => row.includes('revealed'));
+      $('#doneTime').textContent = fmtTime(timer.elapsed);
+      $('#doneNote').textContent = revealed ? 'Finished with a little help from Reveal.' : 'Solved with no reveals — nice work!';
+      setTimeout(() => openModal('#doneModal'), 450);
+    } else toast('The grid is full, but something isn’t right. Try Check.');
+  }
+  wasFull = full;
+}
+
+/* ================= TIMER ================= */
+function showTime() { $('#timer').textContent = fmtTime(timer.elapsed); }
+function startTimer() {
+  if (timer.running || done) return;
+  timer.running = true; timer.start = Date.now() - timer.elapsed * 1000;
+  timer.id = setInterval(() => {
+    timer.elapsed = Math.floor((Date.now() - timer.start) / 1000); showTime();
+    if (timer.elapsed % 5 === 0) save();
+  }, 1000);
+}
+function stopTimer() { clearInterval(timer.id); timer.running = false; }
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (timer.running) { stopTimer(); timer.paused = true; save(); } }
+  else if (timer.paused) { timer.paused = false; startTimer(); }
+});
+
+/* ================= SAVE / SHARE ================= */
+const strip = p => ({ title: p.title || '', rows: p.rows, cols: p.cols, entries: p.entries.map(e => ({ answer: e.answer, clue: e.clue, r: e.r, c: e.c, dir: e.dir, num: e.num })) });
+function save() { if (P) store.set(SAVE_KEY, { puzzle: strip(P), user, mark, elapsed: timer.elapsed, done }); }
+
+function enc(obj) {
+  const bytes = new TextEncoder().encode(JSON.stringify(obj)); let s = '';
+  bytes.forEach(b => s += String.fromCharCode(b));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function dec(str) {
+  const s = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+  return JSON.parse(new TextDecoder().decode(Uint8Array.from(s, ch => ch.charCodeAt(0))));
+}
+const shareCode = p => enc({ t: p.title || '', e: p.entries.map(e => [e.answer, e.clue, e.r, e.c, e.dir === 'down' ? 1 : 0]) });
+function fromShare(code) {
+  const o = dec(code);
+  const list = o.e.map(([a, cl, r, c, d]) => ({ answer: clean(a), clue: String(cl), r: +r, c: +c, dir: d ? 'down' : 'across' }));
+  const p = normalize(list); p.title = String(o.t || 'Shared puzzle');
+  // validate: crossing letters must agree
+  const seen = {};
+  for (const e of p.entries) {
+    const [dr, dc] = DIRS[e.dir];
+    for (let i = 0; i < e.answer.length; i++) {
+      const k = key(e.r + dr * i, e.c + dc * i);
+      if (seen[k] && seen[k] !== e.answer[i]) throw new Error('bad puzzle');
+      seen[k] = e.answer[i];
+    }
+  }
+  return p;
+}
+$('#shareBtn').addEventListener('click', () => {
+  const url = location.origin + location.pathname + '#p=' + shareCode(P);
+  const fallback = () => prompt('Copy this link:', url);
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(url).then(() => toast('Share link copied!'), fallback);
+  else fallback();
+});
+
+/* ================= NEW / CUSTOM ================= */
+const packSel = $('#packSelect');
+Object.keys(PACKS).forEach(name => packSel.add(new Option(name, name)));
+packSel.value = store.get('crossword-pack') || Object.keys(PACKS)[0];
+packSel.addEventListener('change', () => { store.set('crossword-pack', packSel.value); newPuzzle(); });
+
+function newPuzzle() {
+  const name = packSel.value;
+  const entries = PACKS[name].map(([a, c]) => ({ answer: clean(a), clue: c }));
+  const p = generate(entries, TARGET_WORDS); p.title = name;
+  history.replaceState(null, '', location.pathname + location.search);
+  closeModals();
+  setup(p, null);
+}
+$('#newBtn').addEventListener('click', () => {
+  if (P && !done && user.some(row => row.some(Boolean)) && !confirm('Start a new puzzle? Your progress on this one will be lost.')) return;
+  newPuzzle();
+});
+$('#doneNew').addEventListener('click', newPuzzle);
+
+$('#customBtn').addEventListener('click', () => openModal('#customModal'));
+$('#buildCustom').addEventListener('click', () => {
+  const seen = new Set(), entries = [];
+  for (const line of $('#customWords').value.split(/\r?\n/)) {
+    const m = line.match(/^\s*(.+?)\s*(?:[:=\t]|\s[-–—]\s)\s*(.+?)\s*$/);
+    if (!m) continue;
+    const answer = clean(m[1]);
+    if (answer.length < 2 || answer.length > 21 || seen.has(answer)) continue;
+    seen.add(answer); entries.push({ answer, clue: m[2] });
+  }
+  if (entries.length < 3) { toast('Add at least 3 lines like  ANSWER: clue'); return; }
+  const p = generate(entries, entries.length, 120);
+  p.title = $('#customTitle').value.trim() || 'Custom puzzle';
+  const missing = entries.filter(e => !p.entries.some(x => x.answer === e.answer)).map(e => e.answer);
+  history.replaceState(null, '', location.pathname + location.search);
+  closeModals(); setup(p, null);
+  toast(missing.length ? `Couldn't fit: ${missing.join(', ')}` : `Built with all ${entries.length} words!`, missing.length ? 5000 : 2400);
+});
+
+/* ================= MODALS & MENUS ================= */
+function openModal(sel) { $(sel).classList.add('open'); }
+function closeModals() { document.querySelectorAll('.modal.open').forEach(m => m.classList.remove('open')); }
+const modalOpen = () => !!document.querySelector('.modal.open');
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeModals));
+document.querySelectorAll('.modal').forEach(m => m.addEventListener('click', e => { if (e.target === m) closeModals(); }));
+
+const closeMenus = () => document.querySelectorAll('details.menu[open]').forEach(d => d.removeAttribute('open'));
+document.addEventListener('click', e => { if (!e.target.closest('details.menu')) closeMenus(); });
+document.querySelectorAll('details.menu').forEach(d => d.addEventListener('toggle', () => {
+  if (d.open) document.querySelectorAll('details.menu[open]').forEach(o => { if (o !== d) o.removeAttribute('open'); });
+}));
+document.querySelectorAll('[data-check]').forEach(b => b.addEventListener('click', () => { closeMenus(); check(b.dataset.check); focusKbd(); }));
+document.querySelectorAll('[data-reveal]').forEach(b => b.addEventListener('click', () => { closeMenus(); reveal(b.dataset.reveal); focusKbd(); }));
+$('#clearBtn').addEventListener('click', clearAll);
+$('#autoCheck').addEventListener('change', e => {
+  autoCheck = e.target.checked; store.set('crossword-autocheck', autoCheck);
+  if (autoCheck) for (const [r, c] of cellsFor('all')) if (user[r][c] && user[r][c] !== sol[r][c] && mark[r][c] !== 'revealed') mark[r][c] = 'wrong';
+  render(); save();
+});
+$('#prevClue').addEventListener('click', () => { jumpClue(-1); focusKbd(); });
+$('#nextClue').addEventListener('click', () => { jumpClue(1); focusKbd(); });
+$('#clueText').addEventListener('click', () => { toggleDir(); focusKbd(); });
+
+/* ================= KEYBOARD ================= */
+function focusKbd() { try { kbd.focus({ preventScroll: true }); } catch { kbd.focus(); } resetKbd(); }
+function resetKbd() { kbd.value = ' '; try { kbd.setSelectionRange(1, 1); } catch {} }
+
+document.addEventListener('keydown', e => {
+  if (modalOpen()) { if (e.key === 'Escape') closeModals(); return; }
+  const t = e.target;
+  if (t !== kbd && t.closest && t.closest('textarea,input,select')) return;
+  if (t.closest && t.closest('button,summary') && (e.key === ' ' || e.key === 'Enter')) return;
+  if (e.ctrlKey || e.metaKey || e.altKey || !P) return;
+  const k = e.key;
+  if (/^[a-zA-Z]$/.test(k)) { e.preventDefault(); typeLetter(k.toUpperCase()); }
+  else if (k === 'Backspace') { e.preventDefault(); back(); }
+  else if (k === 'Delete') { e.preventDefault(); setCell(cur.r, cur.c, ''); afterChange(); }
+  else if (k === 'ArrowLeft') { e.preventDefault(); arrow(0, -1); }
+  else if (k === 'ArrowRight') { e.preventDefault(); arrow(0, 1); }
+  else if (k === 'ArrowUp') { e.preventDefault(); arrow(-1, 0); }
+  else if (k === 'ArrowDown') { e.preventDefault(); arrow(1, 0); }
+  else if (k === 'Tab' || k === 'Enter') { e.preventDefault(); jumpClue(e.shiftKey ? -1 : 1); }
+  else if (k === ' ') { e.preventDefault(); toggleDir(); }
+});
+// Mobile keyboards (Android often reports key "Unidentified", so read the input instead)
+kbd.addEventListener('input', e => {
+  if (e.inputType === 'deleteContentBackward' || kbd.value.length === 0) back();
+  else { const ch = kbd.value.slice(-1).toUpperCase(); if (/[A-Z]/.test(ch)) typeLetter(ch); }
+  resetKbd();
+});
+
+/* ================= INIT ================= */
+(function init() {
+  const m = location.hash.match(/^#p=([\w-]+)/);
+  const saved = store.get(SAVE_KEY);
+  if (m) {
+    try {
+      const p = fromShare(m[1]);
+      const same = saved && saved.puzzle && shareCode(saved.puzzle) === shareCode(p);
+      setup(p, same ? saved : null);
+      if (!same) toast('Shared puzzle loaded');
+      return;
+    } catch { toast('That share link looks broken — here’s a fresh puzzle.'); }
+  }
+  if (saved && saved.puzzle && saved.puzzle.entries && saved.puzzle.entries.length) {
+    try { setup(saved.puzzle, saved); return; } catch {}
+  }
+  newPuzzle();
+})();
+window.addEventListener('hashchange', () => location.reload());
+})();
+</script>
+</body>
+</html>
