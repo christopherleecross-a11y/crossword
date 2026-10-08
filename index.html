@@ -105,10 +105,32 @@ aside.clues{flex:1 1 300px;display:grid;grid-template-columns:1fr 1fr;gap:12px;m
 
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;opacity:0;transition:.25s;pointer-events:none;z-index:60;max-width:90vw;text-align:center}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+details.menu .items.right{left:auto;right:0}
+#printHead{display:none}
+@media print{
+  @page{margin:.5in}
+  :root{--bg:#fff;--panel:#fff;--ink:#000;--muted:#333;--line:#000;--cell:#fff;--sel:#fff;--word:#fff;--cross:#fff;--given:#000}
+  body{background:#fff;color:#000}
+  header,.toolbar,.cluebar,#kbd,.modal,#toast{display:none!important}
+  .wrap{max-width:none;padding:0}
+  #printHead{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:14px;font-size:11pt}
+  #printHead h2{margin:0;font-size:15pt}
+  main{display:block}
+  #boardWrap{overflow:visible}
+  #board{--cs:min(30px, calc(7.3in / var(--cols)))!important;margin:0 auto 18px}
+  .cell.wrong::before,.cell.revealed::after{display:none}
+  .cell .ltr{color:#000!important}
+  body.print-blank .cell:not(.given) .ltr{visibility:hidden}
+  aside.clues{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .clues section{box-shadow:none;padding:0}
+  .clues ol{max-height:none;overflow:visible}
+  .clues li{padding:2px 0;border:0;background:none!important;color:#000!important;break-inside:avoid;font-size:10pt}
+}
 </style>
 </head>
 <body>
 <div class="wrap">
+  <div id="printHead"><h2 id="printTitle"></h2><span>Name ______________________ &nbsp; Period _____</span></div>
   <header>
     <h1>Crossword <span id="ptitle"></span></h1>
     <div class="controls">
@@ -141,6 +163,12 @@ aside.clues{flex:1 1 300px;display:grid;grid-template-columns:1fr 1fr;gap:12px;m
     <label class="toggle"><input type="checkbox" id="autoCheck"> Auto-check</label>
     <span class="spacer"></span>
     <button class="btn" id="shareBtn">Copy share link</button>
+    <details class="menu"><summary class="btn">Print ▾</summary>
+      <div class="items right">
+        <button data-print="blank">Blank puzzle</button>
+        <button data-print="key">Answer key</button>
+      </div>
+    </details>
   </div>
 
   <main>
@@ -849,6 +877,58 @@ const DIFFS = {
   hard:   { label: 'Hard',   words: 18, maxLen: 99, givens: 0,    lengths: false, hard: true  }
 };
 
+/* Fixed word sets: every word is used in every puzzle, at every difficulty.
+   Difficulty still controls the hints (pre-filled letters, letter counts)
+   and which clue is shown: definition (Easy/Medium) or applied (Hard).   */
+const SETS = {
+  "Geometry 1: Basics": [
+    ["POINT","A position or location shown by a dot, with no dimension","Undefined term named with a single capital letter"],
+    ["LINE","Set of points in one dimension extending forever in both directions","Undefined term named by two points, with arrows on both ends"],
+    ["PLANE","Two-dimensional flat surface extending without end","Undefined term named by three noncollinear points"],
+    ["SEGMENT","Line ___: part of a line with two endpoints and all points between them","Figure written as AB with a bar on top"],
+    ["MIDPOINT","Point that divides a line segment into two congruent parts","(5, 3), for the segment from (2, 1) to (8, 5)"],
+    ["BISECTOR","Line, segment, or ray that divides a segment or angle into congruent pieces","Ray that splits a 70° angle into two 35° angles"],
+    ["VERTICAL","___ angles: two angles whose sides form two pairs of opposite rays","___ angles: nonadjacent pair formed by two intersecting lines, always congruent"],
+    ["COMPLEMENTARY","___ angles: two angles whose measures add up to 90°","___ angles: 25° and 65°, for example"],
+    ["SUPPLEMENTARY","___ angles: two angles whose measures add up to 180°","___ angles: 110° and 70°, for example"],
+    ["LINEAR","___ pair: two angles that are both adjacent and supplementary","___ pair: adjacent angles whose outer sides form a straight line"],
+    ["DISTANCE","Length of the perpendicular segment from one object to another","√((x₂ − x₁)² + (y₂ − y₁)²) finds it"],
+    ["RAY","Half line: one endpoint, extending forever in one direction","Figure named AB with a one-sided arrow on top"],
+    ["COLLINEAR","Describes points that lie on the same line","Any two points are always this"],
+    ["COPLANAR","Describes points that lie in the same plane","Any three points are always this"]
+  ],
+  "Geometry 2: Reasoning, Proof & Lines": [
+    ["CONDITIONAL","___ statement: a logical statement with a hypothesis and a conclusion","___ statement: one written in if-then form"],
+    ["HYPOTHESIS","The \"if\" part of a conditional statement","In \"If it rains, then the game is canceled,\" the part about rain"],
+    ["CONCLUSION","The \"then\" part of a conditional statement","In \"If x = 2, then x² = 4,\" the part \"x² = 4\""],
+    ["NEGATION","The opposite of a statement, formed using \"not\"","\"The angle is not acute,\" for \"The angle is acute\""],
+    ["CONVERSE","Statement formed by switching the hypothesis and the conclusion","\"If q, then p,\" for \"If p, then q\""],
+    ["INVERSE","Statement formed by negating both the hypothesis and the conclusion","\"If not p, then not q,\" for \"If p, then q\""],
+    ["CONTRAPOSITIVE","Statement formed by switching AND negating the hypothesis and the conclusion","\"If not q, then not p\": always true when the original is"],
+    ["BICONDITIONAL","Statement containing the phrase \"if and only if\"","True only when a conditional and its converse are both true"],
+    ["THEOREM","Conditional statement that can be proved using the rules of logic","Pythagorean ___"],
+    ["POSTULATE","Statement accepted as true without proof","Axiom"],
+    ["COUNTEREXAMPLE","An example that proves a statement false","The number 2, for the claim \"All primes are odd\""],
+    ["PARALLEL","Describes coplanar lines that never intersect and stay equidistant","Describes lines with equal slopes"],
+    ["SKEW","___ lines: lines that are not coplanar, so neither parallel nor intersecting","___ lines: only possible in three dimensions"],
+    ["PERPENDICULAR","Describes lines, segments, or planes that intersect to form right angles","Describes lines whose slopes are negative reciprocals"],
+    ["TRANSVERSAL","Line that intersects two or more coplanar lines at different points","Line that creates alternate interior angles"]
+  ],
+  "Geometry 3: Transformations & Triangles": [
+    ["TRANSFORMATION","A change in the location, orientation, or size of a figure","Mapping of a preimage onto an image"],
+    ["TRANSLATION","Transformation that slides a figure a given distance and direction","(x, y) → (x + 3, y − 2), for example"],
+    ["ROTATION","Transformation that turns a figure about a point","(x, y) → (−y, x) is a 90° one"],
+    ["REFLECTION","Transformation that flips a figure across a line to make a mirror image","(x, y) → (x, −y), across the x-axis"],
+    ["DILATION","Transformation that changes the size of a figure","(x, y) → (2x, 2y), for example"],
+    ["CONGRUENT","Describes figures whose corresponding sides and angles have equal measures","Symbolized by ≅"],
+    ["CORRESPONDING","___ parts: sides or angles in the same relative positions in two figures","The first C in CPCTC"],
+    ["ALTITUDE","Perpendicular segment from a vertex of a triangle to the opposite side or its extension","A triangle's height"],
+    ["MEDIAN","Segment from a vertex of a triangle to the midpoint of the opposite side","Three of these meet at a triangle's centroid"],
+    ["MIDSEGMENT","Segment that connects the midpoints of two sides of a triangle","Segment parallel to a triangle's third side and half as long"]
+  ]
+};
+SETS["Geometry: All 39 terms"] = [].concat(...Object.values(SETS));
+
 /* ================= HELPERS ================= */
 const $ = s => document.querySelector(s);
 const rand = n => Math.floor(Math.random() * n);
@@ -1288,11 +1368,16 @@ $('#shareBtn').addEventListener('click', () => {
 /* ================= NEW / CUSTOM ================= */
 const packSel = $('#packSelect');
 const MIXED = 'Mixed (all themes)';
-Object.keys(PACKS).forEach(name => packSel.add(new Option(name, name)));
-packSel.add(new Option(MIXED, MIXED));
+function addGroup(label, names) {
+  const g = document.createElement('optgroup'); g.label = label;
+  names.forEach(n => g.appendChild(new Option(n, n))); packSel.appendChild(g);
+}
+addGroup('Themes', [...Object.keys(PACKS), MIXED]);
+addGroup('Class vocabulary', Object.keys(SETS));
 packSel.value = store.get('crossword-pack') || Object.keys(PACKS)[0];
 if (!packSel.value) packSel.value = Object.keys(PACKS)[0];
 function packWords(name) {
+  if (SETS[name]) return SETS[name];
   if (name !== MIXED) return PACKS[name];
   const seen = new Set(), all = [];
   for (const list of Object.values(PACKS)) for (const w of list) if (!seen.has(w[0])) { seen.add(w[0]); all.push(w); }
@@ -1303,9 +1388,16 @@ packSel.addEventListener('change', () => { store.set('crossword-pack', packSel.v
 function newPuzzle() {
   const name = packSel.value, D = DIFFS[diff];
   let entries = packWords(name).map(([a, c, h]) => ({ answer: clean(a), clue: D.hard && h ? h : c }));
-  const short = entries.filter(e => e.answer.length <= D.maxLen);
-  if (short.length >= D.words + 3) entries = short;
-  const p = generate(entries, D.words); p.title = name === MIXED ? 'Mixed' : name; p.diff = diff;
+  let p;
+  if (SETS[name]) {
+    // class vocabulary: every term goes in, whatever the difficulty
+    for (let i = 0; i < 6; i++) { p = generate(entries, entries.length, 150); if (p.entries.length === entries.length) break; }
+  } else {
+    const short = entries.filter(e => e.answer.length <= D.maxLen);
+    if (short.length >= D.words + 3) entries = short;
+    p = generate(entries, D.words);
+  }
+  p.title = name === MIXED ? 'Mixed' : name; p.diff = diff;
   p.given = pickGivens(p, D.givens);
   history.replaceState(null, '', location.pathname + location.search);
   closeModals();
@@ -1351,6 +1443,17 @@ $('#buildCustom').addEventListener('click', () => {
   closeModals(); setup(p, null);
   toast(missing.length ? `Couldn't fit: ${missing.join(', ')}` : `Built with all ${entries.length} words!`, missing.length ? 5000 : 2400);
 });
+
+/* ================= PRINT ================= */
+function printPuzzle(kind) {
+  $('#printTitle').textContent = (P.title || 'Crossword') + ' · ' + DIFFS[P.diff].label + (kind === 'key' ? ' · ANSWER KEY' : '');
+  document.body.classList.add('print-' + kind);
+  if (kind === 'key') for (let r = 0; r < P.rows; r++) for (let c = 0; c < P.cols; c++) if (cellEls[r][c]) cellEls[r][c].ltr.textContent = sol[r][c];
+  const restore = () => { document.body.classList.remove('print-blank', 'print-key'); render(); window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  window.print();
+}
+document.querySelectorAll('[data-print]').forEach(b => b.addEventListener('click', () => { closeMenus(); printPuzzle(b.dataset.print); }));
 
 /* ================= MODALS & MENUS ================= */
 function openModal(sel) { $(sel).classList.add('open'); }
