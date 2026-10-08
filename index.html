@@ -144,6 +144,15 @@ body.away .wrap{visibility:hidden}
 .report tr+tr th,.report tr+tr td{border-top:1px solid color-mix(in srgb,var(--ink) 10%,transparent)}
 .report td.flag{color:var(--wrong)}
 .report-note{margin-top:8px!important}
+.field{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-size:.95rem}
+.field select{flex:1;background:var(--bg);border:1px solid color-mix(in srgb,var(--ink) 20%,transparent);border-radius:8px;padding:8px 10px}
+.si-msg{min-height:1.4em;margin:0 0 8px!important;color:var(--wrong)!important}
+.si-msg.info{color:var(--muted)!important}
+.si-teacher{text-align:center;margin:12px 0 0!important}
+.si-teacher button,.foot button{background:none;border:0;color:var(--muted);font-size:.8rem;cursor:pointer;text-decoration:underline;margin:0 8px}
+.send-line{margin:6px 0 0!important;font-weight:600}
+.send-line .ok{color:var(--given)}
+.send-line .flag{color:var(--wrong)}
 #printHead{display:none}
 @media print{
   @page{margin:.5in}
@@ -229,7 +238,7 @@ body.away .wrap{visibility:hidden}
       <section><h2>Down</h2><ol id="downList"></ol></section>
     </aside>
   </main>
-  <footer class="foot"><button id="teacherBtn" type="button">Teacher</button></footer>
+  <footer class="foot"><button id="signinBtn" type="button" hidden>Class sign-in</button><button id="teacherBtn" type="button">Teacher</button></footer>
 </div>
 
 <div class="modal" id="customModal">
@@ -265,8 +274,24 @@ osmosis: Movement of water across a membrane"></textarea>
   <div class="dialog">
     <h3>🔒 Test mode</h3>
     <p>Type your name to start. Check, Reveal and copying are turned off. If you leave this page or switch to another tab or app, the puzzle pauses and it's recorded for your teacher.</p>
+    <label id="namePeriodRow" class="field" hidden>Class period <select id="namePeriod"><option value="">Loading…</option></select></label>
     <input type="text" id="studentName" placeholder="First and last name" autocomplete="off" maxlength="40">
     <div class="row"><button class="btn primary" id="nameStart">Start</button></div>
+  </div>
+</div>
+
+<div class="modal gate" id="signinModal">
+  <div class="dialog">
+    <h3>Sign in to your class</h3>
+    <p>Choose your class period and type your name to get the puzzle your teacher assigned.</p>
+    <label class="field">Class period <select id="siPeriod"><option value="">Loading…</option></select></label>
+    <input type="text" id="siName" placeholder="First and last name" autocomplete="off" maxlength="40">
+    <p id="siMsg" class="si-msg" role="status"></p>
+    <div class="row" style="justify-content:space-between">
+      <button class="btn" id="siPractice" type="button">Practice instead</button>
+      <button class="btn primary" id="siGo" type="button">Get my puzzle</button>
+    </div>
+    <p class="si-teacher"><button type="button" id="siTeacher">I'm the teacher</button></p>
   </div>
 </div>
 
@@ -297,6 +322,7 @@ osmosis: Movement of water across a membrane"></textarea>
         <p class="cp-done">Puzzle ready: <b id="cpInfo"></b><br>Puzzle code <b id="cpCode" class="code"></b> (it also appears on each student's results screen, so you can check they did this puzzle).</p>
         <input type="text" id="cpLink" readonly>
         <div class="row"><button class="btn primary" id="cpCopy" type="button">Copy student link</button></div>
+        <p id="cpSheetHint" class="muted" hidden>To assign it through your class Sheet, paste this link into the <b>Puzzle</b> column on the <b>Assignments</b> tab and tick <b>Active</b>.</p>
       </div>
       <details class="cp-more"><summary><h4>Protected word lists</h4></summary>
       <p>Edit, add, or remove lists here. A line starting with <code>## </code> names a list; then one word per line as <code>ANSWER | clue | harder clue</code> (the harder clue is optional). Pick a password, click Generate, then in index.html replace the whole line that starts with <code>const SECURE_SETS =</code> with the new code.</p>
@@ -324,6 +350,12 @@ osmosis: Movement of water across a membrane"></textarea>
 <script>
 (() => {
 'use strict';
+
+/* ================= CLASS SHEET =================
+   Paste your Google Apps Script web app URL (it ends in /exec) between the quotes
+   to turn on class sign-in, assigned puzzles, and automatic results.
+   Leave it empty ('') to turn those off. Setup steps are at the top of Code.gs. */
+const CLASS_SHEET_URL = '';
 
 /* ================= WORD PACKS ================= */
 // Each entry: [ANSWER, straightforward clue (Easy/Medium), trickier clue (Hard)]
@@ -1456,14 +1488,17 @@ function finish() {
   const revealed = mark.some(row => row.includes('revealed'));
   $('#doneTime').textContent = fmtTime(timer.elapsed);
   $('#doneNote').textContent = revealed ? 'Finished with a little help from Reveal.' : 'Solved with no reveals — nice work!';
-  $('#doneReport').innerHTML = isTest() ? reportHTML() : '';
+  const rid = sheetOn() && P.assign ? Date.now().toString(36) + Math.random().toString(36).slice(2, 8) : '';
+  $('#doneReport').innerHTML = isTest() || P.assign ? reportHTML(rid) : '';
+  if (rid) queueResult(resultPayload(rid));
   setTimeout(() => openModal('#doneModal'), 450);
 }
-function reportHTML() {
+function reportHTML(rid) {
   const esc = t => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const cum = cumulative()[P.secure] || { starts: 0, away: 0, awaySec: 0 };
   const rows = [
     ['Student', student || '—'],
+    ...(P.assign ? [['Period', P.assign.period]] : []),
     ['Puzzle', P.title + ' · ' + DIFFS[P.diff].label + ' · ' + P.entries.length + ' words'],
     ['Puzzle code', P.code || '—'],
     ['Time', fmtTime(timer.elapsed)],
@@ -1474,7 +1509,8 @@ function reportHTML() {
     ['Letters revealed', mark.some(row => row.includes('revealed')) ? 'Yes' : 'No']
   ];
   return '<table class="report">' + rows.map(([k, v]) => '<tr><th>' + esc(k) + '</th><td' + (k === 'Left the page' && integ.away ? ' class="flag"' : '') + '>' + esc(v) + '</td></tr>').join('') +
-    '</table><p class="report-note">Show this screen to your teacher.</p>';
+    '</table>' + (rid ? '<p class="send-line">Sent to your teacher: <span id="sendStatus" data-id="' + rid + '">Sending…</span></p>' : '') +
+    '<p class="report-note">Show this screen to your teacher.</p>';
 }
 
 /* ================= TIMER ================= */
@@ -1495,7 +1531,7 @@ document.addEventListener('visibilitychange', () => {
 
 /* ================= SAVE / SHARE ================= */
 const strip = p => ({ title: p.title || '', diff: p.diff, given: p.given || [], rows: p.rows, cols: p.cols,
-  secure: p.secure, layout: p.layout, layoutData: p.layoutData, ss: p.secure && SECURE_SETS[p.secure] ? SECURE_SETS[p.secure].salt : undefined,
+  secure: p.secure, layout: p.layout, layoutData: p.layoutData, assign: p.assign, ss: p.secure && SECURE_SETS[p.secure] ? SECURE_SETS[p.secure].salt : undefined,
   entries: p.entries.map(e => ({ answer: p.secure ? '?'.repeat(e.answer.length) : e.answer, clue: e.clue, r: e.r, c: e.c, dir: e.dir, num: e.num, w: e.w })) });
 function save() { if (P) store.set(SAVE_KEY, { puzzle: strip(P), user, mark, elapsed: timer.elapsed, done, student, integ }); }
 
@@ -1592,22 +1628,25 @@ async function puzzleCode(p) {
   const h = await wordHash(SECURE_SETS[p.secure].salt, 'code', p.diff + JSON.stringify(L.e));
   return h.slice(0, 6).toUpperCase();
 }
-function newPuzzle() {
-  const name = packSel.value, D = DIFFS[diff];
-  let p;
+function puzzleFor(name, d) {
+  const D = DIFFS[d];
   if (SECURE_SETS[name]) {
     // test mode: pick one of the pre-built grids (a different one than last time)
     const n = SECURE_SETS[name].layouts.length;
     let li = rand(n);
-    if (P && P.secure === name && n > 1) li = (P.layout + 1 + rand(n - 1)) % n;
-    p = makeSecurePuzzle(name, li, diff);
-  } else {
-    let entries = packWords(name).map(([a, c, h]) => ({ answer: clean(a), clue: D.hard && h ? h : c }));
-    const short = entries.filter(e => e.answer.length <= D.maxLen);
-    if (short.length >= D.words + 3) entries = short;
-    p = generate(entries, D.words); p.title = name === MIXED ? 'Mixed' : name; p.diff = diff;
-    p.given = pickGivens(p, D.givens);
+    if (P && P.secure === name && n > 1 && P.layout >= 0) li = (P.layout + 1 + rand(n - 1)) % n;
+    return makeSecurePuzzle(name, li, d);
   }
+  if (!PACKS[name] && name !== MIXED) return null;
+  let entries = packWords(name).map(([a, c, h]) => ({ answer: clean(a), clue: D.hard && h ? h : c }));
+  const short = entries.filter(e => e.answer.length <= D.maxLen);
+  if (short.length >= D.words + 3) entries = short;
+  const p = generate(entries, D.words); p.title = name === MIXED ? 'Mixed' : name; p.diff = d;
+  p.given = pickGivens(p, D.givens);
+  return p;
+}
+function newPuzzle() {
+  const p = puzzleFor(packSel.value, diff);
   history.replaceState(null, '', location.pathname + location.search);
   closeModals();
   setup(p, null);
@@ -1725,12 +1764,20 @@ function bumpCumulative(starts, away, awaySec) {
 function startAttempt() { integ = freshInteg(); integ.started = Date.now(); bumpCumulative(1, 0, 0); }
 function askName() {
   $('#studentName').value = store.get('crossword-student') || '';
+  const needPeriod = sheetOn() && !P.assign;
+  $('#namePeriodRow').hidden = !needPeriod;
+  if (needPeriod) loadPeriods($('#namePeriod')).catch(() => { $('#namePeriodRow').hidden = true; });
   openModal('#nameModal');
   setTimeout(() => $('#studentName').focus(), 50);
 }
 $('#nameStart').addEventListener('click', () => {
   const name = $('#studentName').value.trim().replace(/\s+/g, ' ');
   if (name.length < 2) { toast('Please type your name.'); return; }
+  if (!$('#namePeriodRow').hidden) {
+    const per = $('#namePeriod').value;
+    if (!per) { toast('Please choose your class period.'); return; }
+    P.assign = { period: per, label: 'Shared link' }; store.set('crossword-period', per);
+  }
   student = name.slice(0, 40); store.set('crossword-student', student);
   startAttempt();
   $('#nameModal').classList.remove('open');
@@ -1962,6 +2009,134 @@ $('#cpCopy').addEventListener('click', () => {
   else { document.execCommand('copy'); toast('Student link copied'); }
 });
 
+
+/* ================= CLASS SHEET: sign-in, assignments, results ================= */
+const sheetOn = () => /^https?:\/\//.test(CLASS_SHEET_URL);
+async function fetchJSON(url, opts) {
+  const ac = new AbortController(), t = setTimeout(() => ac.abort(), 15000);
+  try {
+    const r = await fetch(url, Object.assign({ redirect: 'follow', signal: ac.signal }, opts || {}));
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+function sheetGet(params) {
+  const u = new URL(CLASS_SHEET_URL);
+  Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
+  return fetchJSON(u.toString());
+}
+// text/plain body keeps this a "simple" request, which Apps Script accepts from any site
+const sheetPost = obj => fetchJSON(CLASS_SHEET_URL, { method: 'POST', body: JSON.stringify(obj) });
+
+let periodsCache = null;
+async function loadPeriods(sel) {
+  if (!periodsCache) {
+    const r = await sheetGet({ action: 'config' });
+    if (!r || !r.ok) throw new Error((r && r.error) || 'No response');
+    periodsCache = r.periods || [];
+  }
+  const last = store.get('crossword-period') || '';
+  sel.innerHTML = '';
+  sel.add(new Option(periodsCache.length ? 'Choose your period…' : 'No periods set up yet', ''));
+  periodsCache.forEach(p => sel.add(new Option(String(p), String(p))));
+  if (periodsCache.includes(last)) sel.value = last;
+}
+
+let practiceTab = false;
+try { practiceTab = sessionStorage.getItem('crossword-practice') === '1'; } catch {}
+function siMsg(t, info) { const m = $('#siMsg'); m.textContent = t || ''; m.classList.toggle('info', !!info); }
+function openSignin() {
+  siMsg('');
+  $('#siName').value = store.get('crossword-student') || '';
+  openModal('#signinModal');
+  loadPeriods($('#siPeriod')).then(() => setTimeout(() => ($('#siPeriod').value ? $('#siName') : $('#siPeriod')).focus(), 50))
+    .catch(() => siMsg('Couldn’t reach your class sheet. Check your internet connection, or practice instead.'));
+}
+$('#siGo').addEventListener('click', async () => {
+  const period = $('#siPeriod').value, name = $('#siName').value.trim().replace(/\s+/g, ' ');
+  if (!period) { siMsg('Choose your class period.'); return; }
+  if (name.length < 2) { siMsg('Type your first and last name.'); return; }
+  const btn = $('#siGo'); btn.disabled = true; siMsg('Looking up your puzzle…', true);
+  try {
+    const r = await sheetGet({ action: 'assignment', period, name });
+    if (!r || !r.ok) { siMsg((r && r.error) || 'Something went wrong. Try again.'); return; }
+    if (!r.found) { siMsg('No puzzle is assigned to you right now. Check with your teacher, or practice instead.'); return; }
+    let p = null;
+    try {
+      if (r.code) p = fromShare(r.code);
+      else if (r.list) p = puzzleFor(r.list, DIFFS[r.diff] ? r.diff : 'medium');
+    } catch {}
+    if (!p) { siMsg('Your assignment couldn’t be opened. Tell your teacher (the Puzzle cell in the Sheet may need fixing).'); return; }
+    p.assign = { period, label: r.label || p.title };
+    student = String(r.name || name).slice(0, 40);
+    store.set('crossword-student', student); store.set('crossword-period', period);
+    if ([...packSel.options].some(o => o.value === (p.secure || p.title))) packSel.value = p.secure || p.title;
+    diff = p.diff;
+    $('#signinModal').classList.remove('open');
+    history.replaceState(null, '', location.pathname + location.search);
+    setup(p, null);
+    toast('Hi ' + student.split(' ')[0] + '! Your puzzle: ' + p.assign.label, 3500);
+    focusKbd();
+  } catch {
+    siMsg('Couldn’t reach your class sheet. Check your internet connection and try again.');
+  } finally { btn.disabled = false; }
+});
+$('#siName').addEventListener('keydown', e => { if (e.key === 'Enter') $('#siGo').click(); });
+$('#siPractice').addEventListener('click', () => {
+  try { sessionStorage.setItem('crossword-practice', '1'); } catch {}
+  practiceTab = true;
+  $('#signinModal').classList.remove('open');
+});
+$('#siTeacher').addEventListener('click', () => { $('#siPractice').click(); $('#teacherBtn').click(); });
+$('#signinBtn').hidden = !sheetOn();
+$('#signinBtn').addEventListener('click', () => {
+  if (hasProgress() && !ask('Leave this puzzle and sign in for an assigned one?')) return;
+  openSignin();
+});
+$('#cpSheetHint').hidden = !sheetOn();
+
+// results: queued on this device and retried until the Sheet confirms
+const OUTBOX = 'crossword-outbox';
+let outbox = store.get(OUTBOX) || [], flushing = false, retryId = 0;
+const sentIds = new Set();
+function resultPayload(id) {
+  const cum = (cumulative()[P.secure] || {}).starts || 1;
+  return {
+    action: 'result', id, period: P.assign.period, student, label: P.assign.label,
+    puzzle: P.title, list: P.secure || '', diff: DIFFS[P.diff].label, words: P.entries.length,
+    code: P.code || '', share: shareCode(P), timeSec: timer.elapsed,
+    away: integ.away || 0, awaySec: integ.awaySec || 0, attempts: isTest() ? cum : '',
+    teacher: !!integ.teacher, revealed: mark.some(row => row.includes('revealed')), finishedAt: new Date().toISOString()
+  };
+}
+function queueResult(item) { outbox.push(item); store.set(OUTBOX, outbox); flushOutbox(); }
+async function flushOutbox() {
+  if (!sheetOn() || flushing || !outbox.length) { showSendStatus(); return; }
+  flushing = true; clearTimeout(retryId); showSendStatus();
+  while (outbox.length) {
+    const item = outbox[0];
+    let r = null;
+    try { r = await sheetPost(item); } catch {}
+    if (r && r.ok) { sentIds.add(item.id); outbox.shift(); }
+    else if (r) { item.tries = (item.tries || 0) + 1; if (item.tries >= 5) outbox.shift(); else break; } // the Sheet answered with an error
+    else break; // offline or unreachable: try again later
+    store.set(OUTBOX, outbox);
+  }
+  store.set(OUTBOX, outbox);
+  flushing = false; showSendStatus();
+  if (outbox.length) retryId = setTimeout(flushOutbox, 20000);
+}
+function showSendStatus() {
+  const el = document.getElementById('sendStatus'); if (!el) return;
+  const id = el.dataset.id;
+  if (sentIds.has(id)) { el.textContent = '✓ Sent'; el.className = 'ok'; }
+  else if (outbox.some(x => x.id === id)) {
+    el.textContent = flushing ? 'Sending…' : 'Not sent yet. Keep this page open and online; it will keep trying.';
+    el.className = flushing ? '' : 'flag';
+  } else { el.textContent = 'Couldn’t send. Show this screen to your teacher.'; el.className = 'flag'; }
+}
+window.addEventListener('online', flushOutbox);
+
 /* ================= KEYBOARD ================= */
 function focusKbd() { try { kbd.focus({ preventScroll: true }); } catch { kbd.focus(); } resetKbd(); }
 function resetKbd() { kbd.value = ' '; try { kbd.setSelectionRange(1, 1); } catch {} }
@@ -1995,6 +2170,7 @@ kbd.addEventListener('input', e => {
 
 /* ================= INIT ================= */
 (function init() {
+  flushOutbox();
   const m = location.hash.match(/^#p=([\w-]+)/);
   const saved = store.get(SAVE_KEY);
   if (m) {
@@ -2007,8 +2183,14 @@ kbd.addEventListener('input', e => {
     } catch { toast('That share link looks broken — here’s a fresh puzzle.'); }
   }
   const stale = saved && saved.puzzle && saved.puzzle.secure && (!SECURE_SETS[saved.puzzle.secure] || SECURE_SETS[saved.puzzle.secure].salt !== saved.puzzle.ss);
-  if (saved && saved.puzzle && saved.puzzle.entries && saved.puzzle.entries.length && !stale) {
+  const signin = sheetOn() && !practiceTab;
+  if (saved && saved.puzzle && saved.puzzle.entries && saved.puzzle.entries.length && !stale && !(signin && saved.done)) {
     try { setup(saved.puzzle, saved); return; } catch {}
+  }
+  if (signin) {
+    // a plain practice puzzle sits behind the sign-in screen
+    if (!PACKS[packSel.value]) packSel.value = Object.keys(PACKS)[0];
+    newPuzzle(); openSignin(); return;
   }
   newPuzzle();
 })();
