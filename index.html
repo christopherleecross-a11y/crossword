@@ -125,6 +125,19 @@ body.away .wrap{visibility:hidden}
 .dialog h4{margin:14px 0 6px}
 .dialog code{font-size:.85em;background:var(--bg);padding:1px 4px;border-radius:4px}
 #tLists,#tOut{min-height:160px}
+.cp-row{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;margin-bottom:10px}
+.cp-row label{display:flex;align-items:center;gap:6px;font-size:.92rem}
+.cp-row select,.cp-row input{background:var(--bg);border:1px solid color-mix(in srgb,var(--ink) 20%,transparent);border-radius:8px;padding:6px 8px}
+.cp-row input[type=number]{width:5em}
+.muted{color:var(--muted);font-size:.9rem}
+.cp-words{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:2px 10px;max-height:220px;overflow:auto;border:1px solid color-mix(in srgb,var(--ink) 12%,transparent);border-radius:8px;padding:8px 10px;margin-bottom:10px}
+.cp-words label{display:flex;gap:6px;align-items:center;font-size:.85rem;font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer}
+.cp-done{color:var(--ink)!important}
+.code{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:.08em}
+#cpLink{width:100%;background:var(--bg);border:1px solid color-mix(in srgb,var(--ink) 20%,transparent);border-radius:8px;padding:8px 10px;margin-bottom:10px;font-size:.85rem}
+.cp-more{margin-top:16px;border-top:1px solid color-mix(in srgb,var(--ink) 12%,transparent);padding-top:6px}
+.cp-more summary{cursor:pointer;list-style:revert}
+.cp-more summary h4{display:inline;margin:0}
 .report{width:100%;border-collapse:collapse;margin:10px 0 4px;text-align:left;font-size:.92rem}
 .report th{font-weight:500;color:var(--muted);padding:5px 8px 5px 0;white-space:nowrap;vertical-align:top}
 .report td{padding:5px 0;font-weight:600}
@@ -267,13 +280,33 @@ osmosis: Movement of water across a membrane"></textarea>
     </div>
     <div id="tOpen" hidden>
       <p><b>Teacher mode is on in this tab.</b> Refresh the page to lock it again before a student uses this device.</p>
-      <h4>Protected word lists</h4>
+      <h4>Make a class puzzle</h4>
+      <p>Choose a list and how many of its words to use. Words are picked at random; tick or untick any word to swap it. You'll get a link to give students.</p>
+      <div class="cp-row">
+        <label>List <select id="cpSet"></select></label>
+        <label>Difficulty <select id="cpDiff"><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label>
+      </div>
+      <div class="cp-row">
+        <label>How many words? <input type="number" id="cpCount" min="3" step="1" inputmode="numeric"></label>
+        <span id="cpOf" class="muted"></span>
+        <button class="btn" id="cpShuffle" type="button">Pick different words</button>
+      </div>
+      <div id="cpWords" class="cp-words"></div>
+      <div class="row"><button class="btn primary" id="cpBuild" type="button">Build puzzle</button></div>
+      <div id="cpResult" hidden>
+        <p class="cp-done">Puzzle ready: <b id="cpInfo"></b><br>Puzzle code <b id="cpCode" class="code"></b> (it also appears on each student's results screen, so you can check they did this puzzle).</p>
+        <input type="text" id="cpLink" readonly>
+        <div class="row"><button class="btn primary" id="cpCopy" type="button">Copy student link</button></div>
+      </div>
+      <details class="cp-more"><summary><h4>Protected word lists</h4></summary>
       <p>Edit, add, or remove lists here. A line starting with <code>## </code> names a list; then one word per line as <code>ANSWER | clue | harder clue</code> (the harder clue is optional). Pick a password, click Generate, then in index.html replace the whole line that starts with <code>const SECURE_SETS =</code> with the new code.</p>
       <textarea id="tLists" spellcheck="false"></textarea>
       <input type="text" id="tNewPw" placeholder="Password for these lists (leave blank to keep the current one)" autocomplete="off">
       <div class="row"><button class="btn primary" id="tGen">Generate code</button></div>
       <textarea id="tOut" readonly placeholder="The generated code appears here" spellcheck="false"></textarea>
-      <div class="row"><button class="btn" id="tCopy">Copy code</button><button class="btn" data-close>Close</button></div>
+      <div class="row"><button class="btn" id="tCopy">Copy code</button></div>
+      </details>
+      <div class="row" style="margin-top:12px"><button class="btn" data-close>Close</button></div>
     </div>
   </div>
 </div>
@@ -1182,6 +1215,7 @@ function setup(puzzle, saved) {
   cur = { r: first.r, c: first.c, dir: first.dir };
   showTime(); render(); save();
   if (isLocked() && !student && !done) askName();
+  if (P.secure) { const mine = P; puzzleCode(P).then(c => { mine.code = c; }); }
 }
 
 // Pre-filled "given" letters (Easy). They show in green and can't be changed.
@@ -1430,7 +1464,8 @@ function reportHTML() {
   const cum = cumulative()[P.secure] || { starts: 0, away: 0, awaySec: 0 };
   const rows = [
     ['Student', student || '—'],
-    ['Puzzle', P.title + ' · ' + DIFFS[P.diff].label],
+    ['Puzzle', P.title + ' · ' + DIFFS[P.diff].label + ' · ' + P.entries.length + ' words'],
+    ['Puzzle code', P.code || '—'],
     ['Time', fmtTime(timer.elapsed)],
     ['Finished', new Date(integ.finished || Date.now()).toLocaleString()],
     ['Left the page', integ.away + (integ.away === 1 ? ' time' : ' times') + (integ.away ? ' (' + fmtTime(integ.awaySec) + ' away)' : '')],
@@ -1460,7 +1495,7 @@ document.addEventListener('visibilitychange', () => {
 
 /* ================= SAVE / SHARE ================= */
 const strip = p => ({ title: p.title || '', diff: p.diff, given: p.given || [], rows: p.rows, cols: p.cols,
-  secure: p.secure, layout: p.layout, ss: p.secure && SECURE_SETS[p.secure] ? SECURE_SETS[p.secure].salt : undefined,
+  secure: p.secure, layout: p.layout, layoutData: p.layoutData, ss: p.secure && SECURE_SETS[p.secure] ? SECURE_SETS[p.secure].salt : undefined,
   entries: p.entries.map(e => ({ answer: p.secure ? '?'.repeat(e.answer.length) : e.answer, clue: e.clue, r: e.r, c: e.c, dir: e.dir, num: e.num, w: e.w })) });
 function save() { if (P) store.set(SAVE_KEY, { puzzle: strip(P), user, mark, elapsed: timer.elapsed, done, student, integ }); }
 
@@ -1473,10 +1508,14 @@ function dec(str) {
   const s = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
   return JSON.parse(new TextDecoder().decode(Uint8Array.from(s, ch => ch.charCodeAt(0))));
 }
-const shareCode = p => p.secure ? enc({ s: p.secure, l: p.layout, d: p.diff }) : enc({ t: p.title || '', d: p.diff, g: p.given || [], e: p.entries.map(e => [e.answer, e.clue, e.r, e.c, e.dir === 'down' ? 1 : 0]) });
+const shareCode = p => p.secure ? (p.layoutData ? enc({ s: p.secure, L: p.layoutData, d: p.diff }) : enc({ s: p.secure, l: p.layout, d: p.diff })) : enc({ t: p.title || '', d: p.diff, g: p.given || [], e: p.entries.map(e => [e.answer, e.clue, e.r, e.c, e.dir === 'down' ? 1 : 0]) });
 function fromShare(code) {
   const o = dec(code);
-  if (o.s) { if (!SECURE_SETS[o.s]) throw new Error('unknown list'); return makeSecurePuzzle(o.s, +o.l, DIFFS[o.d] ? o.d : 'medium'); }
+  if (o.s) {
+    if (!SECURE_SETS[o.s]) throw new Error('unknown list');
+    const d = DIFFS[o.d] ? o.d : 'medium';
+    return o.L ? makeAssignedPuzzle(o.s, o.L, d) : makeSecurePuzzle(o.s, +o.l, d);
+  }
   const list = o.e.map(([a, cl, r, c, d]) => ({ answer: clean(a), clue: String(cl), r: +r, c: +c, dir: d ? 'down' : 'across' }));
   const p = normalize(list); p.title = String(o.t || 'Shared puzzle');
   p.diff = DIFFS[o.d] ? o.d : 'medium';
@@ -1494,7 +1533,7 @@ function fromShare(code) {
   return p;
 }
 $('#shareBtn').addEventListener('click', () => {
-  const url = location.origin + location.pathname + '#p=' + shareCode(P);
+  const url = location.href.split('#')[0] + '#p=' + shareCode(P);
   const fallback = () => { suppressAway++; prompt('Copy this link:', url); setTimeout(() => suppressAway--, 400); };
   if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(url).then(() => toast('Share link copied!'), fallback);
   else fallback();
@@ -1519,14 +1558,39 @@ function packWords(name) {
 }
 packSel.addEventListener('change', () => { store.set('crossword-pack', packSel.value); newPuzzle(); });
 
-function makeSecurePuzzle(name, li, d) {
+function puzzleFromLayout(name, L, d) {
   const set = SECURE_SETS[name], D = DIFFS[d];
-  if (!set.layouts[li]) li = rand(set.layouts.length);
-  const L = set.layouts[li];
   const list = L.e.map(([w, r, c, down]) => ({ answer: '?'.repeat(set.words[w].n), clue: D.hard ? set.words[w].k : set.words[w].c, r, c, dir: down ? 'down' : 'across', w }));
   const p = normalize(list);
-  Object.assign(p, { title: name, diff: d, secure: name, layout: li, given: D.givens ? L.g.map(g => g.slice()) : [] });
+  Object.assign(p, { title: name, diff: d, secure: name, given: D.givens ? (L.g || []).map(g => g.slice()) : [] });
   return p;
+}
+function makeSecurePuzzle(name, li, d) {
+  const set = SECURE_SETS[name];
+  if (!set.layouts[li]) li = rand(set.layouts.length);
+  const p = puzzleFromLayout(name, set.layouts[li], d); p.layout = li;
+  return p;
+}
+// a teacher-built puzzle using some of the list's words (arrives by link; holds positions, never answers)
+function makeAssignedPuzzle(name, L, d) {
+  const set = SECURE_SETS[name], seen = new Set();
+  if (!L || !Array.isArray(L.e) || L.e.length < 2) throw new Error('bad puzzle');
+  const clean4 = L.e.map(x => {
+    const [w, r, c, down] = x.map(Number);
+    if (!set.words[w] || seen.has(w) || !(r >= 0 && c >= 0 && r < 60 && c < 60)) throw new Error('bad puzzle');
+    seen.add(w); return [w, r, c, down ? 1 : 0];
+  });
+  const g = Array.isArray(L.g) ? L.g.filter(x => Array.isArray(x) && x.length === 3 && /^[A-Z]$/.test(x[2])).map(([r, c, ch]) => [+r, +c, ch]) : [];
+  const lay = { e: clean4, g };
+  const p = puzzleFromLayout(name, lay, d);
+  p.layout = -1; p.layoutData = lay;
+  return p;
+}
+const layoutOf = p => p.layoutData || (SECURE_SETS[p.secure] && SECURE_SETS[p.secure].layouts[p.layout]);
+async function puzzleCode(p) {
+  const L = layoutOf(p); if (!L) return '';
+  const h = await wordHash(SECURE_SETS[p.secure].salt, 'code', p.diff + JSON.stringify(L.e));
+  return h.slice(0, 6).toUpperCase();
 }
 function newPuzzle() {
   const name = packSel.value, D = DIFFS[diff];
@@ -1549,7 +1613,9 @@ function newPuzzle() {
   setup(p, null);
 }
 const hasProgress = () => P && !done && user.some((row, r) => row.some((v, c) => v && mark[r][c] !== 'given'));
+const assignedLock = () => { if (isLocked() && P.layoutData) { toast('Your teacher set up this puzzle. Use Clear to start over.'); return true; } return false; };
 $('#newBtn').addEventListener('click', () => {
+  if (assignedLock()) return;
   if (hasProgress() && !ask('Start a new puzzle? Your progress on this one will be lost.')) return;
   newPuzzle();
 });
@@ -1562,6 +1628,7 @@ function showDiff() {
 }
 document.querySelectorAll('#diffSeg button').forEach(b => b.addEventListener('click', () => {
   if (b.dataset.diff === (P && P.diff)) return;
+  if (assignedLock()) return;
   if (hasProgress() && !ask('Switch difficulty? This starts a new puzzle and your progress will be lost.')) return;
   diff = b.dataset.diff; store.set('crossword-diff', diff);
   newPuzzle();
@@ -1748,6 +1815,7 @@ if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListen
 // ---- teacher ----
 $('#teacherBtn').addEventListener('click', () => {
   $('#tLocked').hidden = teacher.on; $('#tOpen').hidden = !teacher.on;
+  if (teacher.on) cpInit();
   openModal('#teacherModal');
   if (!teacher.on) setTimeout(() => $('#tPw').focus(), 50);
 });
@@ -1762,6 +1830,7 @@ $('#tUnlock').addEventListener('click', async () => {
   teacher.on = true; teacher.pw = pw; teacher.answers = answers; $('#tPw').value = '';
   $('#tLists').value = listsText(); $('#tNewPw').value = '';
   $('#tLocked').hidden = true; $('#tOpen').hidden = false;
+  cpInit();
   if (isTest()) { integ.teacher = true; fillAnswers(); $('#nameModal').classList.remove('open'); }
   applyMode(); buildClues(); $('#clueText').dataset.sig = ''; render(); save();
   toast('Teacher mode is on in this tab');
@@ -1810,6 +1879,87 @@ $('#tCopy').addEventListener('click', () => {
   t.select();
   if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t.value).then(() => toast('Copied'), () => document.execCommand('copy'));
   else { document.execCommand('copy'); toast('Copied'); }
+});
+
+
+// ---- teacher: build a class puzzle from part of a protected list ----
+const cpSel = $('#cpSet');
+function cpInit() {
+  cpSel.innerHTML = '';
+  Object.keys(SECURE_SETS).forEach(n => cpSel.add(new Option(n + ' (' + SECURE_SETS[n].words.length + ' words)', n)));
+  if (P && P.secure) cpSel.value = P.secure;
+  $('#cpDiff').value = diff;
+  $('#cpResult').hidden = true;
+  cpFill(true);
+}
+function cpFill(resetCount) {
+  const A = teacher.answers[cpSel.value], N = A.length, box = $('#cpWords');
+  const cnt = $('#cpCount');
+  cnt.max = N;
+  if (resetCount || !(+cnt.value >= 3)) cnt.value = Math.min(N, 15);
+  if (+cnt.value > N) cnt.value = N;
+  $('#cpOf').textContent = 'of ' + N;
+  box.innerHTML = '';
+  A.map((a, i) => [a, i]).sort((x, y) => x[0].localeCompare(y[0])).forEach(([a, i]) => {
+    const l = document.createElement('label');
+    l.innerHTML = '<input type="checkbox"> <span></span>';
+    l.firstChild.value = i; l.lastChild.textContent = a;
+    box.appendChild(l);
+  });
+  cpPick();
+}
+function cpPick() {
+  const boxes = [...document.querySelectorAll('#cpWords input')];
+  const n = Math.max(3, Math.min(boxes.length, Math.round(+$('#cpCount').value) || 3));
+  $('#cpCount').value = n;
+  const pick = new Set(shuffle(boxes.map((_, i) => i)).slice(0, n));
+  boxes.forEach((b, i) => b.checked = pick.has(i));
+  $('#cpResult').hidden = true;
+}
+cpSel.addEventListener('change', () => cpFill(true));
+$('#cpCount').addEventListener('change', cpPick);
+$('#cpShuffle').addEventListener('click', cpPick);
+$('#cpWords').addEventListener('change', () => {
+  $('#cpCount').value = document.querySelectorAll('#cpWords input:checked').length;
+  $('#cpResult').hidden = true;
+});
+$('#cpBuild').addEventListener('click', async () => {
+  const name = cpSel.value, d = $('#cpDiff').value, A = teacher.answers[name];
+  const chosen = [...document.querySelectorAll('#cpWords input:checked')].map(b => +b.value);
+  if (chosen.length < 3) { toast('Pick at least 3 words.'); return; }
+  const btn = $('#cpBuild'); btn.disabled = true; btn.textContent = 'Building…';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const idx = new Map(chosen.map(i => [A[i], i]));
+    const entries = chosen.map(i => ({ answer: A[i], clue: '' }));
+    let best = null;
+    for (let t = 0; t < 10; t++) {
+      const g = generate(entries, entries.length, 150);
+      if (!best || g.entries.length > best.entries.length) best = g;
+      if (best.entries.length === entries.length) break;
+    }
+    const missing = chosen.filter(i => !best.entries.some(e => e.answer === A[i])).map(i => A[i]);
+    const letterAt = {};
+    for (const e of best.entries) for (let i = 0; i < e.answer.length; i++) letterAt[e.dir === 'across' ? e.r + ',' + (e.c + i) : (e.r + i) + ',' + e.c] = e.answer[i];
+    const g = d === 'easy' ? pickGivens(best, DIFFS.easy.givens).map(([r, c]) => [r, c, letterAt[r + ',' + c]]) : [];
+    const L = { e: best.entries.map(e => [idx.get(e.answer), e.r, e.c, e.dir === 'down' ? 1 : 0]), g };
+    const puzzle = makeAssignedPuzzle(name, L, d);
+    packSel.value = name; diff = d;
+    history.replaceState(null, '', location.pathname + location.search);
+    setup(puzzle, null);
+    const code = await puzzleCode(P); P.code = code;
+    $('#cpInfo').textContent = name + ' · ' + DIFFS[d].label + ' · ' + P.entries.length + ' words';
+    $('#cpCode').textContent = code;
+    $('#cpLink').value = location.href.split('#')[0] + '#p=' + shareCode(P);
+    $('#cpResult').hidden = false;
+    if (missing.length) toast('Couldn’t fit ' + missing.join(', ') + ' into the grid. The puzzle uses the rest; try “Pick different words” for another mix.', 7000);
+  } catch (err) { toast('Something went wrong building that puzzle. Try again.'); }
+  finally { btn.disabled = false; btn.textContent = 'Build puzzle'; }
+});
+$('#cpCopy').addEventListener('click', () => {
+  const t = $('#cpLink'); t.select();
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(t.value).then(() => toast('Student link copied'), () => document.execCommand('copy'));
+  else { document.execCommand('copy'); toast('Student link copied'); }
 });
 
 /* ================= KEYBOARD ================= */
