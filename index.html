@@ -140,6 +140,7 @@ body.covered #coverHint{display:block}
 .cp-words label{display:flex;gap:6px;align-items:center;font-size:.85rem;font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer}
 .cp-done{color:var(--ink)!important}
 .cp-check{cursor:pointer}
+.show-pw{display:block;margin:8px 0 4px;font-size:14px}
 .bank{grid-column:1/-1}
 #bankList{display:flex;flex-wrap:wrap;gap:6px 8px;padding:2px 0 4px}
 .chip{display:inline-flex;align-items:baseline;gap:4px;border:1px solid color-mix(in srgb,var(--ink) 22%,transparent);border-radius:999px;padding:4px 11px;font-weight:600;letter-spacing:.04em;font-size:.92rem;background:var(--bg)}
@@ -325,6 +326,7 @@ osmosis: Movement of water across a membrane"></textarea>
     <div id="tLocked">
       <p>Enter the teacher password to turn on Check, Reveal, Print and the answer key for test-mode puzzles in this tab. Refreshing the page locks it again.</p>
       <input type="password" id="tPw" placeholder="Teacher password" autocomplete="off">
+      <label class="cp-check show-pw"><input type="checkbox" id="tShowPw"> Show password</label>
       <div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" id="tUnlock">Unlock</button></div>
     </div>
     <div id="tOpen" hidden>
@@ -2062,8 +2064,10 @@ $('#teacherBtn').addEventListener('click', () => {
   $('#tLocked').hidden = teacher.on; $('#tOpen').hidden = !teacher.on;
   if (teacher.on) cpInit();
   openModal('#teacherModal');
+  $('#tShowPw').checked = false; $('#tPw').type = 'password';
   if (!teacher.on) setTimeout(() => $('#tPw').focus(), 50);
 });
+$('#tShowPw').addEventListener('change', e => { $('#tPw').type = e.target.checked ? 'text' : 'password'; $('#tPw').focus(); });
 $('#tPw').addEventListener('keydown', e => { if (e.key === 'Enter') $('#tUnlock').click(); });
 $('#tUnlock').addEventListener('click', async () => {
   const pw = $('#tPw').value; if (!pw) return;
@@ -2075,7 +2079,7 @@ $('#tUnlock').addEventListener('click', async () => {
   tries.forEach((t, i) => { if (t.status === 'fulfilled') answers[names[i]] = t.value; });
   btn.disabled = false; btn.textContent = 'Unlock';
   if (!Object.keys(answers).length) { toast('That password didn’t work.'); return; }
-  teacher.on = true; teacher.pw = pw; teacher.answers = answers; $('#tPw').value = '';
+  teacher.on = true; teacher.pw = pw; teacher.answers = answers; $('#tPw').value = ''; $('#tPw').type = 'password'; $('#tShowPw').checked = false;
   $('#tLists').value = listsText(); $('#tNewPw').value = '';
   $('#tLocked').hidden = true; $('#tOpen').hidden = false;
   cpInit();
