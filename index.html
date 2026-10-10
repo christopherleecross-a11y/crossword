@@ -161,6 +161,12 @@ body.covered #coverHint{display:block}
 .si-msg{min-height:1.4em;margin:0 0 8px!important;color:var(--wrong)!important}
 .si-msg.info{color:var(--muted)!important}
 .si-teacher{text-align:center;margin:12px 0 0!important}
+/* while the sign-in screen is up, no puzzle is visible behind it */
+body.signing main,body.signing .toolbar,body.signing .controls,body.signing .modebar,body.signing #ptitle{visibility:hidden}
+.modebar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-radius:12px;padding:10px 14px;margin-bottom:12px;font-weight:600}
+.modebar.assigned{background:color-mix(in srgb,var(--given) 14%,var(--panel));border:1px solid color-mix(in srgb,var(--given) 45%,transparent)}
+.modebar.practice{background:color-mix(in srgb,var(--sel) 22%,var(--panel));border:1px solid color-mix(in srgb,var(--sel) 70%,transparent)}
+@media print{.modebar{display:none!important}}
 .si-teacher button,.foot button{background:none;border:0;color:var(--muted);font-size:.8rem;cursor:pointer;text-decoration:underline;margin:0 8px}
 .send-line{margin:6px 0 0!important;font-weight:600}
 .send-line .ok{color:var(--given)}
@@ -223,6 +229,7 @@ body.covered #coverHint{display:block}
       </div>
     </details>
     <button class="btn" id="clearBtn">Clear</button>
+    <button class="btn primary" id="turnInBtn" hidden>Turn in</button>
     <label class="toggle teach-only"><input type="checkbox" id="autoCheck"> Auto-check</label>
     <label class="toggle teach-only"><input type="checkbox" id="bankToggle"> Word bank</label>
     <span class="spacer"></span>
@@ -235,6 +242,7 @@ body.covered #coverHint{display:block}
     </details>
   </div>
 
+  <div id="modeBar" class="modebar" hidden><span id="modeText"></span><button class="btn" id="modeSignin" type="button" hidden>Sign in for my assignment</button></div>
   <main>
     <div class="play">
       <div class="cluebar">
@@ -274,7 +282,7 @@ osmosis: Movement of water across a membrane"></textarea>
 
 <div class="modal" id="doneModal">
   <div class="dialog center">
-    <h3>🎉 Solved!</h3>
+    <h3 id="doneTitle">🎉 Solved!</h3>
     <div class="big" id="doneTime">0:00</div>
     <p id="doneNote"></p>
     <div id="doneReport"></div>
@@ -1540,6 +1548,7 @@ function reveal(scope) {
   afterChange();
 }
 function clearAll() {
+  if (done && P.assign && !knows()) { toast('This puzzle has been turned in.'); return; }
   if (!ask('Clear all your answers?')) return;
   user = grid2(''); mark = grid2(''); applyGivens();
   done = false; wasFull = false; board.classList.remove('solved');
@@ -1572,20 +1581,25 @@ async function verifyGrid() {
   }
   return true;
 }
-function finish() {
+// early = { correct, total } when a student turns in an unfinished puzzle
+function finish(early) {
   if (done) return;
   done = true; stopTimer(); $('#toast').classList.remove('show');
   if (isTest()) integ.finished = Date.now();
-  save();
-  board.classList.add('solved');
+  integ.score = early ? { correct: early.correct, total: early.total, early: true } : { correct: P.entries.length, total: P.entries.length, early: false };
+  save(); applyMode();
+  if (!early) board.classList.add('solved');
   const revealed = mark.some(row => row.includes('revealed'));
+  $('#doneTitle').textContent = early ? '📝 Turned in' : '🎉 Solved!';
   $('#doneTime').textContent = fmtTime(timer.elapsed);
-  $('#doneNote').textContent = revealed ? 'Finished with a little help from Reveal.' : 'Solved with no reveals — nice work!';
+  $('#doneNote').textContent = early ? early.correct + ' of ' + early.total + ' words correct.'
+    : revealed ? 'Finished with a little help from Reveal.' : 'Solved with no reveals — nice work!';
   const rid = P.assign && P.assign.sheet ? Date.now().toString(36) + Math.random().toString(36).slice(2, 8) : '';
   $('#doneReport').innerHTML = isTest() || P.assign ? reportHTML(rid) : '';
   if (rid) queueResult(resultPayload(rid));
   setTimeout(() => openModal('#doneModal'), 450);
 }
+const scoreText = () => { const sc = integ.score; return sc ? sc.correct + ' of ' + sc.total + ' words correct' + (sc.early ? ' (turned in early)' : '') : ''; };
 function reportHTML(rid) {
   const esc = t => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const cum = cumulative()[P.secure] || { starts: 0, away: 0, awaySec: 0 };
@@ -1597,6 +1611,7 @@ function reportHTML(rid) {
     ['Puzzle code', P.code || '—'],
     ...(P.variants ? [['Version', (P.version || 1) + ' of ' + P.variants.length]] : []),
     ['Word bank', showBank() ? 'Yes' : 'No'],
+    ['Score', scoreText()],
     ['Time', fmtTime(timer.elapsed)],
     ['Finished', new Date(integ.finished || Date.now()).toLocaleString()],
     ['Left the page', integ.away + (integ.away === 1 ? ' time' : ' times') + (integ.away ? ' (' + fmtTime(integ.awaySec) + ' away)' : '')],
@@ -1858,6 +1873,29 @@ $('#clueText').addEventListener('click', () => { toggleDir(); focusKbd(); });
 // confirm() can steal window focus; don't count our own dialogs as "left the page"
 function ask(msg) { suppressAway++; try { return confirm(msg); } finally { setTimeout(() => suppressAway--, 400); } }
 
+// Turn in: only on assigned puzzles (they have a Sheet to go to), until finished
+const canTurnIn = () => !!(P && P.assign && P.assign.sheet && !done);
+async function countCorrect() {
+  let correct = 0, filled = 0;
+  const set = P.secure && !knows() ? SECURE_SETS[P.secure] : null;
+  for (const e of P.entries) {
+    const word = e.cells.map(([r, c]) => user[r][c]).join('');
+    if (word.length !== e.answer.length) continue;
+    filled++;
+    if (set ? await wordHash(set.salt, e.w, word) === set.words[e.w].x : word === e.answer) correct++;
+  }
+  return { correct, filled, total: P.entries.length };
+}
+$('#turnInBtn').addEventListener('click', async () => {
+  if (!canTurnIn()) return;
+  const sc = await countCorrect();
+  if (sc.correct === sc.total) { finish(); return; }
+  const left = sc.total - sc.filled;
+  if (!ask('Turn in your puzzle now?\n\n' + (left ? left + (left === 1 ? ' word is' : ' words are') + ' still blank. ' : '') +
+           'You won\u2019t be able to change your answers after you turn it in.')) return;
+  finish({ correct: sc.correct, total: sc.total });
+});
+
 function applyMode() {
   const b = document.body;
   b.classList.toggle('testmode', isTest());
@@ -1866,6 +1904,17 @@ function applyMode() {
   if (!isLocked()) { b.classList.remove('away'); }
   $('#modeBadge').textContent = !isTest() ? '' : teacher.answers[P.secure] ? '🔓 Teacher mode' : '🔒 Test mode';
   setWatermark();
+  $('#turnInBtn').hidden = !canTurnIn();
+  const bar = $('#modeBar');
+  if (!sheetOn() || !P || teacher.on) bar.hidden = true;
+  else if (P.assign) {
+    bar.hidden = false; bar.className = 'modebar assigned'; $('#modeSignin').hidden = true;
+    $('#modeText').textContent = '📋 Assignment: ' + (P.assign.label && P.assign.label !== 'Shared link' ? P.assign.label : P.title) +
+      (P.assign.teacher && TEACHERS.length > 1 ? ' · ' + P.assign.teacher.replace(/\s*\(.*\)$/, '') : '') + ' · Period ' + P.assign.period;
+  } else {
+    bar.hidden = false; bar.className = 'modebar practice'; $('#modeSignin').hidden = false;
+    $('#modeText').textContent = 'Practice puzzle: this isn’t an assignment.';
+  }
 }
 function fillAnswers() {
   const A = teacher.answers[P.secure]; if (!A) return;
@@ -2254,9 +2303,11 @@ function openSignin() {
   $('#siName').value = store.get('crossword-student') || '';
   const lastT = TEACHERS.findIndex(t => t.name === store.get('crossword-teacher'));
   tSel.value = String(lastT >= 0 ? lastT : Math.max(0, TEACHERS.findIndex(hasSheet)));
+  document.body.classList.add('signing');
   openModal('#signinModal');
   loadTeacherPeriods();
 }
+function closeSignin() { $('#signinModal').classList.remove('open'); document.body.classList.remove('signing'); }
 $('#siGo').addEventListener('click', async () => {
   const period = $('#siPeriod').value, name = $('#siName').value.trim().replace(/\s+/g, ' '), tch = chosenTeacher();
   if (!hasSheet(tch)) { siMsg(tch.name + ' hasn’t connected a class sheet yet. You can practice instead.'); return; }
@@ -2281,7 +2332,7 @@ $('#siGo').addEventListener('click', async () => {
     store.set('crossword-student', student); store.set('crossword-period', period); store.set('crossword-teacher', tch.name);
     if ([...packSel.options].some(o => o.value === (p.secure || p.title))) packSel.value = p.secure || p.title;
     diff = p.diff;
-    $('#signinModal').classList.remove('open');
+    closeSignin();
     history.replaceState(null, '', location.pathname + location.search);
     setup(p, null);
     toast('Hi ' + student.split(' ')[0] + '! Your puzzle: ' + p.assign.label, 3500);
@@ -2294,10 +2345,11 @@ $('#siName').addEventListener('keydown', e => { if (e.key === 'Enter') $('#siGo'
 $('#siPractice').addEventListener('click', () => {
   try { sessionStorage.setItem('crossword-practice', '1'); } catch {}
   practiceTab = true;
-  $('#signinModal').classList.remove('open');
+  closeSignin(); applyMode();
 });
 $('#siTeacher').addEventListener('click', () => { $('#siPractice').click(); $('#teacherBtn').click(); });
 $('#signinBtn').hidden = !sheetOn();
+$('#modeSignin').addEventListener('click', () => $('#signinBtn').click());
 $('#signinBtn').addEventListener('click', () => {
   if (hasProgress() && !ask('Leave this puzzle and sign in for an assigned one?')) return;
   openSignin();
@@ -2316,7 +2368,8 @@ function resultPayload(id) {
     code: P.code || '', share: shareCode(P), timeSec: timer.elapsed, wordBank: !!showBank(),
     version: P.variants ? (P.version || 1) + ' of ' + P.variants.length : '',
     away: integ.away || 0, awaySec: integ.awaySec || 0, attempts: isTest() ? cum : '',
-    teacher: !!integ.teacher, revealed: mark.some(row => row.includes('revealed')), finishedAt: new Date().toISOString()
+    teacher: !!integ.teacher, revealed: mark.some(row => row.includes('revealed')), finishedAt: new Date().toISOString(),
+    score: integ.score ? integ.score.correct + ' of ' + integ.score.total : '', status: integ.score && integ.score.early ? 'Turned in early' : 'Solved'
   };
 }
 function queueResult(item) { outbox.push(item); store.set(OUTBOX, outbox); flushOutbox(); }
@@ -2396,11 +2449,13 @@ kbd.addEventListener('input', e => {
   }
   const stale = saved && saved.puzzle && saved.puzzle.secure && (!SECURE_SETS[saved.puzzle.secure] || SECURE_SETS[saved.puzzle.secure].salt !== saved.puzzle.ss);
   const signin = sheetOn() && !practiceTab;
-  if (saved && saved.puzzle && saved.puzzle.entries && saved.puzzle.entries.length && !stale && !(signin && saved.done)) {
+  // with sign-in on, only an unfinished ASSIGNED puzzle comes back by itself; anything else waits for sign-in
+  const resume = !signin || (saved && saved.puzzle && saved.puzzle.assign && !saved.done);
+  if (saved && saved.puzzle && saved.puzzle.entries && saved.puzzle.entries.length && !stale && resume) {
     try { setup(saved.puzzle, saved); return; } catch {}
   }
   if (signin) {
-    // a plain practice puzzle sits behind the sign-in screen
+    // a practice puzzle waits, hidden, behind the sign-in screen
     if (!PACKS[packSel.value]) packSel.value = Object.keys(PACKS)[0];
     newPuzzle(); openSignin(); return;
   }
