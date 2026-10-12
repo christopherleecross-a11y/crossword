@@ -173,6 +173,21 @@ body.signing main,body.signing .toolbar,body.signing .controls,body.signing .mod
 .send-line .ok{color:var(--given)}
 .send-line .flag{color:var(--wrong)}
 #printHead{display:none}
+#keysPrint{display:none}
+.vk{border-top:1px solid var(--line);margin-top:14px;padding-top:4px}
+.kp{break-after:page;page-break-after:always;font-family:system-ui,sans-serif;color:#000}
+.kp:last-child{break-after:auto;page-break-after:auto}
+.kp h2{font-size:14pt;margin:0 0 10px}
+.kg{border-collapse:collapse;margin:0 auto 14px}
+.kg td{width:var(--ks);height:var(--ks);padding:0;position:relative;text-align:center;vertical-align:middle;font-weight:700;font-size:calc(var(--ks) * .55)}
+.kg td.k{border:1px solid #000}
+.kg td.k i{position:absolute;left:2px;top:0;font-style:normal;font-weight:400;font-size:calc(var(--ks) * .3)}
+.kc{display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:9.5pt}
+.kc h3{font-size:11pt;margin:0 0 4px}.kc ol{margin:0;padding:0;list-style:none}.kc li{margin:0 0 3px;break-inside:avoid}
+@media print{
+  body.print-allkeys > *:not(#keysPrint){display:none!important}
+  body.print-allkeys #keysPrint{display:block!important}
+}
 @media print{
   @page{margin:.5in}
   :root{--bg:#fff;--panel:#fff;--ink:#000;--muted:#333;--line:#000;--cell:#fff;--sel:#fff;--word:#fff;--cross:#fff;--given:#000}
@@ -199,6 +214,7 @@ body.signing main,body.signing .toolbar,body.signing .controls,body.signing .mod
 </head>
 <body>
 <div class="wrap">
+  <div id="keysPrint"></div>
   <div id="printHead"><h2 id="printTitle"></h2><span>Name ______________________ &nbsp; Period _____</span></div>
   <header>
     <h1>Crossword <span id="ptitle"></span></h1>
@@ -357,6 +373,20 @@ osmosis: Movement of water across a membrane"></textarea>
         <div class="row"><button class="btn primary" id="cpCopy" type="button">Copy student link</button></div>
         <p id="cpSheetHint" class="muted" hidden>To assign it through your class Sheet, paste this link into the <b>Puzzle</b> column on the <b>Assignments</b> tab and tick <b>Active</b>.</p>
       </div>
+      <div id="vkBox" class="vk" hidden>
+        <h4>Answer keys for each version</h4>
+        <p class="muted" id="vkInfo"></p>
+        <div class="cp-row">
+          <label>Student <input type="text" id="vkName" placeholder="First and last name" autocomplete="off"></label>
+          <button class="btn" id="vkShow" type="button">Show their version</button>
+        </div>
+        <div class="cp-row">
+          <label>Or version <select id="vkSel"></select></label>
+          <button class="btn" id="vkShowV" type="button">Show</button>
+          <button class="btn" id="vkPrintAll" type="button">Print all answer keys</button>
+        </div>
+      </div>
+      <p id="vkHint" class="muted">To see answer keys for an assignment with several versions, build it above or open its student link, then unlock teacher mode.</p>
       <details class="cp-more"><summary><h4>Protected word lists</h4></summary>
       <p>Your lists are below (other teachers' lists aren't shown and are kept as they are). Edit, add, or remove lists here. Start each list's name with one of your courses, like <code>## Geometry 2: Unit 5</code>, then then one word per line as <code>ANSWER | clue | harder clue</code> (the harder clue is optional). Pick a password, click Generate, then in index.html replace the whole line that starts with <code>const SECURE_SETS =</code> with the new code.</p>
       <textarea id="tLists" spellcheck="false"></textarea>
@@ -1611,7 +1641,7 @@ function reportHTML(rid) {
     ...(P.assign && P.assign.teacher && TEACHERS.length > 1 ? [['Teacher', P.assign.teacher]] : []),
     ['Puzzle', P.title + ' · ' + DIFFS[P.diff].label + ' · ' + P.entries.length + ' words'],
     ['Puzzle code', P.code || '—'],
-    ...(P.variants ? [['Version', (P.version || 1) + ' of ' + P.variants.length]] : []),
+    ...(verText(P) ? [['Version', verText(P)]] : []),
     ['Word bank', showBank() ? 'Yes' : 'No'],
     ['Score', scoreText()],
     ['Time', fmtTime(timer.elapsed)],
@@ -1760,6 +1790,14 @@ function versionIndex(who, n) {
   let h = 2166136261;
   for (const ch of key) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
   return n ? h % n : 0;
+}
+// "3 of 10": a multi-version link, or a list name assigned in the Sheet (one of the list's grids)
+function verText(p) {
+  if (!p) return '';
+  if (p.variants) return (p.version || 1) + ' of ' + p.variants.length;
+  const set = p.secure && SECURE_SETS[p.secure];
+  if (p.assign && set && p.layout >= 0 && set.layouts.length > 1) return (p.layout + 1) + ' of ' + set.layouts.length;
+  return '';
 }
 function applyVersion(p, who) {
   if (!p.variants || p.versionChosen) return p;
@@ -2063,6 +2101,7 @@ if (window.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListen
 $('#teacherBtn').addEventListener('click', () => {
   $('#tLocked').hidden = teacher.on; $('#tOpen').hidden = !teacher.on;
   if (teacher.on) cpInit();
+  vkInit();
   openModal('#teacherModal');
   $('#tShowPw').checked = false; $('#tPw').type = 'password';
   if (!teacher.on) setTimeout(() => $('#tPw').focus(), 50);
@@ -2085,6 +2124,7 @@ $('#tUnlock').addEventListener('click', async () => {
   cpInit();
   if (isTest() && teacher.answers[P.secure]) { integ.teacher = true; fillAnswers(); $('#nameModal').classList.remove('open'); }
   applyMode(); buildClues(); renderBank(true); $('#clueText').dataset.sig = ''; render(); save();
+  vkInit();
   toast('Teacher mode is on in this tab');
 });
 function listsText() {
@@ -2147,6 +2187,67 @@ $('#tCopy').addEventListener('click', () => {
 
 // ---- teacher: build a class puzzle from part of a protected list ----
 const cpSel = $('#cpSet');
+/* ---- answer keys for each version (teacher mode) ---- */
+function vkSource() {
+  if (!P || !P.secure || !teacher.answers[P.secure]) return null;
+  if (P.variants) return { n: P.variants.length, make: i => makeAssignedPuzzle(P.secure, P.variants[i], P.diff), cur: (P.version || 1) - 1, link: true };
+  const L = SECURE_SETS[P.secure].layouts;
+  if (P.layout >= 0 && L.length > 1) return { n: L.length, make: i => makeSecurePuzzle(P.secure, i, P.diff), cur: P.layout, link: false };
+  return null;
+}
+function vkInit() {
+  const s = teacher.on ? vkSource() : null;
+  $('#vkBox').hidden = !s; $('#vkHint').hidden = !!s;
+  if (!s) return;
+  $('#vkInfo').textContent = P.title + ' · ' + DIFFS[P.diff].label + ' · ' + s.n + (s.link ? ' versions' : ' grids (when this list name is assigned in your Sheet)') +
+    '. On screen now: Version ' + (s.cur + 1) + '. The Version column in your Results tab tells you which one each student had.';
+  const sel = $('#vkSel'); sel.innerHTML = '';
+  for (let i = 0; i < s.n; i++) sel.add(new Option('Version ' + (i + 1), String(i)));
+  sel.value = String(s.cur);
+}
+function vkShow(i, who) {
+  const s = vkSource(); if (!s) return;
+  const old = P, np = s.make(i);
+  if (s.link) Object.assign(np, { source: old.source, wbAll: old.wbAll, variants: old.variants, version: i + 1, versionChosen: true });
+  np.code = old.code;
+  setup(np, null);
+  $('#ptitle').textContent += ' · Version ' + (i + 1) + ' of ' + s.n + (who ? ' (' + who + ')' : '');
+  closeModals();
+  toast((who ? who + ' has ' : 'Showing ') + 'Version ' + (i + 1) + ' of ' + s.n + '. Print → Answer key prints this one.', 4000);
+}
+$('#vkShow').addEventListener('click', () => {
+  const who = $('#vkName').value.trim().replace(/\s+/g, ' '), s = vkSource();
+  if (!s) return;
+  if (who.split(' ').length < 2) { toast('Type the student’s first and last name, spelled as on your Roster.'); return; }
+  vkShow(versionIndex(who, s.n), who);
+});
+$('#vkName').addEventListener('keydown', e => { if (e.key === 'Enter') $('#vkShow').click(); });
+$('#vkShowV').addEventListener('click', () => vkShow(+$('#vkSel').value));
+$('#vkPrintAll').addEventListener('click', () => {
+  const s = vkSource(); if (!s) return;
+  const A = teacher.answers[P.secure];
+  const esc = t => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  let html = '';
+  for (let i = 0; i < s.n; i++) {
+    const q = s.make(i), grid = Array.from({ length: q.rows }, () => Array(q.cols).fill(null)), nums = {};
+    for (const e of q.entries) {
+      const a = A[e.w], [dr, dc] = DIRS[e.dir]; e.answer = a;
+      nums[e.r + ',' + e.c] = e.num;
+      for (let k = 0; k < a.length; k++) grid[e.r + dr * k][e.c + dc * k] = a[k];
+    }
+    const ks = Math.min(26, Math.floor(690 / q.cols));
+    const rows = grid.map((row, r) => '<tr>' + row.map((ch, c) => ch ? `<td class="k">${nums[r + ',' + c] ? '<i>' + nums[r + ',' + c] + '</i>' : ''}${ch}</td>` : '<td></td>').join('') + '</tr>').join('');
+    const list = dir => q.entries.filter(e => e.dir === dir).map(e => `<li><b>${e.num}.</b> ${esc(e.clue)} <b>${e.answer}</b></li>`).join('');
+    html += `<section class="kp"><h2>${esc(q.title)} · ${DIFFS[q.diff].label} · ANSWER KEY · Version ${i + 1} of ${s.n}</h2>` +
+      `<table class="kg" style="--ks:${ks}px">${rows}</table><div class="kc"><div><h3>Across</h3><ol>${list('across')}</ol></div><div><h3>Down</h3><ol>${list('down')}</ol></div></div></section>`;
+  }
+  const kp = $('#keysPrint'); kp.innerHTML = html;
+  if (kp.parentNode !== document.body) document.body.appendChild(kp); // must sit directly in <body> to print alone
+  document.body.classList.add('print-allkeys');
+  const restore = () => { document.body.classList.remove('print-allkeys'); $('#keysPrint').innerHTML = ''; window.removeEventListener('afterprint', restore); };
+  window.addEventListener('afterprint', restore);
+  window.print();
+});
 function cpInit() {
   cpSel.innerHTML = '';
   Object.keys(SECURE_SETS).filter(n => teacher.answers[n]).forEach(n => cpSel.add(new Option(n + ' (' + SECURE_SETS[n].words.length + ' words)', n)));
@@ -2238,6 +2339,8 @@ $('#cpBuild').addEventListener('click', async () => {
     $('#cpCode').textContent = P.code;
     $('#cpLink').value = location.href.split('#')[0] + '#p=' + code;
     $('#cpResult').hidden = false;
+    if (lays.length > 1) $('#ptitle').textContent += ' · Version 1 of ' + lays.length;
+    vkInit();
     if (first.missing.length) toast('Couldn’t fit ' + first.missing.join(', ') + ' into the grid. The puzzle uses the rest; try “Pick different words” for another mix.', 7000);
   } catch (err) { toast('Something went wrong building that puzzle. Try again.'); }
   finally { btn.disabled = false; btn.textContent = 'Build puzzle'; }
@@ -2370,7 +2473,7 @@ function resultPayload(id) {
     action: 'result', id, to: P.assign.sheet, period: P.assign.period, student, label: P.assign.label,
     puzzle: P.title, list: P.secure || '', diff: DIFFS[P.diff].label, words: P.entries.length,
     code: P.code || '', share: shareCode(P), timeSec: timer.elapsed, wordBank: !!showBank(),
-    version: P.variants ? (P.version || 1) + ' of ' + P.variants.length : '',
+    version: verText(P),
     away: integ.away || 0, awaySec: integ.awaySec || 0, attempts: isTest() ? cum : '',
     teacher: !!integ.teacher, revealed: mark.some(row => row.includes('revealed')), finishedAt: new Date().toISOString(),
     score: integ.score ? integ.score.correct + ' of ' + integ.score.total : '', status: integ.score && integ.score.early ? 'Turned in early' : 'Solved'
