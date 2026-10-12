@@ -1330,6 +1330,8 @@ function setup(puzzle, saved) {
   timer.elapsed = saved ? saved.elapsed || 0 : 0;
   done = saved ? !!saved.done : false;
   wasFull = isFull();
+  // an assignment's clock runs from sign-in (and picks up again after a reload), not from the first letter typed
+  if (P.assign && isLocked() && student && !done && integ.started) startTimer();
   board.classList.remove('solved');
   applyMode();
   buildBoard(); buildClues(); renderBank(true);
@@ -1630,14 +1632,15 @@ function finish(early) {
   const revealed = mark.some(row => row.includes('revealed'));
   $('#doneTitle').textContent = early ? (early.timeout ? '⏰ Time’s up — turned in' : '📝 Turned in') : '🎉 Solved!';
   $('#doneTime').textContent = fmtTime(timer.elapsed);
-  $('#doneNote').textContent = early ? early.correct + ' of ' + early.total + ' words correct.'
+  $('#doneNote').textContent = early ? early.correct + ' of ' + early.total + ' words correct: ' + pct(early) + '.'
     : revealed ? 'Finished with a little help from Reveal.' : 'Solved with no reveals — nice work!';
   const rid = P.assign && P.assign.sheet ? Date.now().toString(36) + Math.random().toString(36).slice(2, 8) : '';
   $('#doneReport').innerHTML = isTest() || P.assign ? reportHTML(rid) : '';
   if (rid) queueResult(resultPayload(rid));
   setTimeout(() => openModal('#doneModal'), 450);
 }
-const scoreText = () => { const sc = integ.score; return sc ? sc.correct + ' of ' + sc.total + ' words correct' + (sc.timeout ? ' (time ran out)' : sc.early ? ' (turned in early)' : '') : ''; };
+const pct = sc => Math.round(sc.correct / sc.total * 100) + '%';
+const scoreText = () => { const sc = integ.score; return sc ? sc.correct + ' of ' + sc.total + ' words correct (' + pct(sc) + ')' + (sc.timeout ? ' (time ran out)' : sc.early ? ' (turned in early)' : '') : ''; };
 function reportHTML(rid) {
   const esc = t => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const cum = cumulative()[P.secure] || { starts: 0, away: 0, awaySec: 0 };
