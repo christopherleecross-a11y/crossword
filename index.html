@@ -174,6 +174,7 @@ body.signing main,body.signing .toolbar,body.signing .controls,body.signing .mod
 .send-line .flag{color:var(--wrong)}
 #printHead{display:none}
 #keysPrint{display:none}
+#timer.low{color:var(--wrong);font-weight:700}
 .vk{border-top:1px solid var(--line);margin-top:14px;padding-top:4px}
 .kp{break-after:page;page-break-after:always;font-family:system-ui,sans-serif;color:#000}
 .kp:last-child{break-after:auto;page-break-after:auto}
@@ -359,6 +360,10 @@ osmosis: Movement of water across a membrane"></textarea>
       <div class="cp-row">
         <label class="cp-check"><input type="checkbox" id="cpBank"> Word bank for everyone</label>
         <span class="muted">Students ticked in the Roster's Word bank column always get one.</span>
+      </div>
+      <div class="cp-row">
+        <label>Time limit <input type="number" id="cpTime" min="1" max="300" step="1" placeholder="none" inputmode="numeric"> minutes</label>
+        <span class="muted">Optional. Leave blank for no limit. When time runs out, the puzzle turns itself in.</span>
       </div>
       <div class="cp-row">
         <label>How many words? <input type="number" id="cpCount" min="3" step="1" inputmode="numeric"></label>
@@ -1618,11 +1623,12 @@ function finish(early) {
   if (done) return;
   done = true; stopTimer(); $('#toast').classList.remove('show');
   if (isTest()) integ.finished = Date.now();
-  integ.score = early ? { correct: early.correct, total: early.total, early: true } : { correct: P.entries.length, total: P.entries.length, early: false };
+  integ.score = early ? { correct: early.correct, total: early.total, early: true, timeout: !!early.timeout } : { correct: P.entries.length, total: P.entries.length, early: false };
+  integ.words = early && early.words ? early.words : P.entries.map(e => wordRec(e, typedOf(e), true));
   save(); applyMode();
   if (!early) board.classList.add('solved');
   const revealed = mark.some(row => row.includes('revealed'));
-  $('#doneTitle').textContent = early ? '📝 Turned in' : '🎉 Solved!';
+  $('#doneTitle').textContent = early ? (early.timeout ? '⏰ Time’s up — turned in' : '📝 Turned in') : '🎉 Solved!';
   $('#doneTime').textContent = fmtTime(timer.elapsed);
   $('#doneNote').textContent = early ? early.correct + ' of ' + early.total + ' words correct.'
     : revealed ? 'Finished with a little help from Reveal.' : 'Solved with no reveals — nice work!';
@@ -1631,7 +1637,7 @@ function finish(early) {
   if (rid) queueResult(resultPayload(rid));
   setTimeout(() => openModal('#doneModal'), 450);
 }
-const scoreText = () => { const sc = integ.score; return sc ? sc.correct + ' of ' + sc.total + ' words correct' + (sc.early ? ' (turned in early)' : '') : ''; };
+const scoreText = () => { const sc = integ.score; return sc ? sc.correct + ' of ' + sc.total + ' words correct' + (sc.timeout ? ' (time ran out)' : sc.early ? ' (turned in early)' : '') : ''; };
 function reportHTML(rid) {
   const esc = t => String(t).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const cum = cumulative()[P.secure] || { starts: 0, away: 0, awaySec: 0 };
@@ -1657,7 +1663,32 @@ function reportHTML(rid) {
 }
 
 /* ================= TIMER ================= */
-function showTime() { $('#timer').textContent = fmtTime(timer.elapsed); }
+// the time limit runs on the clock from when the student started, even while they're away from the page
+const limitOn = () => !!(P && P.tl && canTurnIn() && !teacher.on && student && integ && integ.started);
+const limitLeft = () => Math.ceil((integ.started + P.tl * 60000 - Date.now()) / 1000);
+function showTime() {
+  const t = $('#timer');
+  if (limitOn()) { const s = Math.max(0, limitLeft()); t.textContent = '⏱ ' + fmtTime(s) + ' left'; t.classList.toggle('low', s <= 60); }
+  else { t.textContent = fmtTime(timer.elapsed); t.classList.remove('low'); }
+}
+let limitBusy = false;
+const limitSaid = new Set();
+setInterval(async () => {
+  if (!limitOn() || limitBusy) return;
+  const s = limitLeft(); showTime();
+  const say = (k, msg) => { const id = integ.started + ':' + k; if (!limitSaid.has(id)) { limitSaid.add(id); toast(msg, 4000); } };
+  if (s > 0) {
+    if (s > P.tl * 60 - 5) say('start', 'You have ' + P.tl + (P.tl === 1 ? ' minute' : ' minutes') + '. The puzzle turns itself in when time runs out.');
+    else if (s <= 60) say('1', '1 minute left!');
+    else if (s <= 300 && P.tl > 5) say('5', '5 minutes left.');
+    return;
+  }
+  limitBusy = true;
+  try {
+    const sc = await countCorrect();
+    if (!done) finish(sc.correct === sc.total ? undefined : { correct: sc.correct, total: sc.total, words: sc.words, timeout: true });
+  } finally { limitBusy = false; }
+}, 1000);
 function startTimer() {
   if (timer.running || done) return;
   timer.running = true; timer.start = Date.now() - timer.elapsed * 1000;
@@ -1675,7 +1706,7 @@ document.addEventListener('visibilitychange', () => {
 /* ================= SAVE / SHARE ================= */
 const strip = p => ({ title: p.title || '', diff: p.diff, given: p.given || [], rows: p.rows, cols: p.cols,
   secure: p.secure, layout: p.layout, layoutData: p.layoutData, assign: p.assign, bank: p.bank, source: p.source,
-  variants: p.variants, version: p.version, versionChosen: p.versionChosen, wbAll: p.wbAll, wordBank: p.wordBank, ss: p.secure && SECURE_SETS[p.secure] ? SECURE_SETS[p.secure].salt : undefined,
+  variants: p.variants, version: p.version, versionChosen: p.versionChosen, wbAll: p.wbAll, wordBank: p.wordBank, tl: p.tl, ss: p.secure && SECURE_SETS[p.secure] ? SECURE_SETS[p.secure].salt : undefined,
   entries: p.entries.map(e => ({ answer: p.secure ? '?'.repeat(e.answer.length) : e.answer, clue: e.clue, r: e.r, c: e.c, dir: e.dir, num: e.num, w: e.w })) });
 function save() { if (P) store.set(SAVE_KEY, { puzzle: strip(P), user, mark, elapsed: timer.elapsed, done, student, integ }); }
 
@@ -1699,7 +1730,7 @@ function fromShare(code) {
       if (!o.V.length || o.V.length > 40) throw new Error('bad puzzle');
       p = makeAssignedPuzzle(o.s, o.V[0], d); p.variants = o.V; p.version = 1;
     } else p = o.L ? makeAssignedPuzzle(o.s, o.L, d) : makeSecurePuzzle(o.s, +o.l, d);
-    p.source = code; p.wbAll = !!o.wb;
+    p.source = code; p.wbAll = !!o.wb; p.tl = +o.tl > 0 ? Math.min(300, Math.round(+o.tl)) : 0;
     return p;
   }
   const list = o.e.map(([a, cl, r, c, d]) => ({ answer: clean(a), clue: String(cl), r: +r, c: +c, dir: d ? 'down' : 'across' }));
@@ -1803,7 +1834,7 @@ function applyVersion(p, who) {
   if (!p.variants || p.versionChosen) return p;
   const i = versionIndex(who, p.variants.length);
   const np = makeAssignedPuzzle(p.secure, p.variants[i], p.diff);
-  Object.assign(np, { source: p.source, wbAll: p.wbAll, variants: p.variants, version: i + 1, versionChosen: true, assign: p.assign, wordBank: p.wordBank });
+  Object.assign(np, { source: p.source, wbAll: p.wbAll, tl: p.tl, variants: p.variants, version: i + 1, versionChosen: true, assign: p.assign, wordBank: p.wordBank });
   return np;
 }
 function puzzleFor(name, d) {
@@ -1915,16 +1946,23 @@ function ask(msg) { suppressAway++; try { return confirm(msg); } finally { setTi
 
 // Turn in: only on assigned puzzles (they have a Sheet to go to), until finished
 const canTurnIn = () => !!(P && P.assign && P.assign.sheet && !done);
+// one word as sent to the teacher's Sheet: [label like "4A", what was typed (_ = blank), 1 if right, word number in the list, clue if wrong]
+const wordRec = (e, typed, ok) => [e.num + (e.dir === 'across' ? 'A' : 'D'), typed, ok ? 1 : 0, e.w == null ? -1 : e.w, ok ? '' : String(e.clue || '').slice(0, 70)];
+const typedOf = e => e.cells.map(([r, c]) => user[r][c] || '_').join('');
 async function countCorrect() {
   let correct = 0, filled = 0;
-  const set = P.secure && !knows() ? SECURE_SETS[P.secure] : null;
+  const set = P.secure && !knows() ? SECURE_SETS[P.secure] : null, words = [];
   for (const e of P.entries) {
-    const word = e.cells.map(([r, c]) => user[r][c]).join('');
-    if (word.length !== e.answer.length) continue;
-    filled++;
-    if (set ? await wordHash(set.salt, e.w, word) === set.words[e.w].x : word === e.answer) correct++;
+    const typed = typedOf(e);
+    let ok = false;
+    if (!typed.includes('_')) {
+      filled++;
+      ok = set ? await wordHash(set.salt, e.w, typed) === set.words[e.w].x : typed === e.answer;
+      if (ok) correct++;
+    }
+    words.push(wordRec(e, typed, ok));
   }
-  return { correct, filled, total: P.entries.length };
+  return { correct, filled, total: P.entries.length, words };
 }
 $('#turnInBtn').addEventListener('click', async () => {
   if (!canTurnIn()) return;
@@ -1933,7 +1971,7 @@ $('#turnInBtn').addEventListener('click', async () => {
   const left = sc.total - sc.filled;
   if (!ask('Turn in your puzzle now?\n\n' + (left ? left + (left === 1 ? ' word is' : ' words are') + ' still blank. ' : '') +
            'You won\u2019t be able to change your answers after you turn it in.')) return;
-  finish({ correct: sc.correct, total: sc.total });
+  finish({ correct: sc.correct, total: sc.total, words: sc.words });
 });
 
 function applyMode() {
@@ -1950,7 +1988,8 @@ function applyMode() {
   else if (P.assign) {
     bar.hidden = false; bar.className = 'modebar assigned'; $('#modeSignin').hidden = true;
     $('#modeText').textContent = '📋 Assignment: ' + (P.assign.label && P.assign.label !== 'Shared link' ? P.assign.label : P.title) +
-      (P.assign.teacher && TEACHERS.length > 1 ? ' · ' + P.assign.teacher.replace(/\s*\(.*\)$/, '') : '') + ' · Period ' + P.assign.period;
+      (P.assign.teacher && TEACHERS.length > 1 ? ' · ' + P.assign.teacher.replace(/\s*\(.*\)$/, '') : '') + ' · Period ' + P.assign.period +
+      (P.tl ? ' · ' + P.tl + '-minute time limit' : '');
   } else {
     bar.hidden = false; bar.className = 'modebar practice'; $('#modeSignin').hidden = false;
     $('#modeText').textContent = 'Practice puzzle: this isn’t an assignment.';
@@ -2208,7 +2247,7 @@ function vkInit() {
 function vkShow(i, who) {
   const s = vkSource(); if (!s) return;
   const old = P, np = s.make(i);
-  if (s.link) Object.assign(np, { source: old.source, wbAll: old.wbAll, variants: old.variants, version: i + 1, versionChosen: true });
+  if (s.link) Object.assign(np, { source: old.source, wbAll: old.wbAll, tl: old.tl, variants: old.variants, version: i + 1, versionChosen: true });
   np.code = old.code;
   setup(np, null);
   $('#ptitle').textContent += ' · Version ' + (i + 1) + ' of ' + s.n + (who ? ' (' + who + ')' : '');
@@ -2327,6 +2366,8 @@ $('#cpBuild').addEventListener('click', async () => {
     }
     const payload = lays.length > 1 ? { s: name, V: lays, d } : { s: name, L: lays[0], d };
     if ($('#cpBank').checked) payload.wb = 1;
+    const tl = Math.round(+$('#cpTime').value);
+    if (tl > 0) payload.tl = Math.min(300, tl);
     const code = enc(payload);
     const puzzle = fromShare(code);
     packSel.value = name; diff = d;
@@ -2335,7 +2376,7 @@ $('#cpBuild').addEventListener('click', async () => {
     P.code = await puzzleCode(P);
     $('#cpInfo').textContent = name + ' · ' + DIFFS[d].label + ' · ' + P.entries.length + ' words' +
       (lays.length > 1 ? ' · ' + lays.length + (mode === 'words' ? ' versions with different words' : ' different grids') : ' · same for everyone') +
-      (payload.wb ? ' · word bank for everyone' : '');
+      (payload.wb ? ' · word bank for everyone' : '') + (payload.tl ? ' · ' + payload.tl + '-minute time limit' : '');
     $('#cpCode').textContent = P.code;
     $('#cpLink').value = location.href.split('#')[0] + '#p=' + code;
     $('#cpResult').hidden = false;
@@ -2476,7 +2517,8 @@ function resultPayload(id) {
     version: verText(P),
     away: integ.away || 0, awaySec: integ.awaySec || 0, attempts: isTest() ? cum : '',
     teacher: !!integ.teacher, revealed: mark.some(row => row.includes('revealed')), finishedAt: new Date().toISOString(),
-    score: integ.score ? integ.score.correct + ' of ' + integ.score.total : '', status: integ.score && integ.score.early ? 'Turned in early' : 'Solved'
+    score: integ.score ? integ.score.correct + ' of ' + integ.score.total : '', status: integ.score && integ.score.timeout ? 'Time ran out' : integ.score && integ.score.early ? 'Turned in early' : 'Solved',
+    words: integ.words || []
   };
 }
 function queueResult(item) { outbox.push(item); store.set(OUTBOX, outbox); flushOutbox(); }
