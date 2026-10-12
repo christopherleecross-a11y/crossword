@@ -2459,6 +2459,13 @@ function openSignin() {
   loadTeacherPeriods();
 }
 function closeSignin() { $('#signinModal').classList.remove('open'); document.body.classList.remove('signing'); }
+// a student signing in always gets a locked puzzle, even in a tab where the teacher unlocked teacher mode
+function lockTeacher() {
+  if (!teacher.on) return;
+  teacher.on = false; teacher.pw = ''; teacher.answers = {};
+  $('#tLists').value = ''; $('#tNewPw').value = '';
+  $('#tLocked').hidden = false; $('#tOpen').hidden = true;
+}
 $('#siGo').addEventListener('click', async () => {
   const period = $('#siPeriod').value, name = $('#siName').value.trim().replace(/\s+/g, ' '), tch = chosenTeacher();
   if (!hasSheet(tch)) { siMsg(tch.name + ' hasn’t connected a class sheet yet. You can practice instead.'); return; }
@@ -2479,6 +2486,7 @@ $('#siGo').addEventListener('click', async () => {
     if (!p) { siMsg('Your assignment couldn’t be opened. Tell your teacher (the Puzzle cell in the Sheet may need fixing).'); return; }
     p.assign = { period, label: r.label || p.title, teacher: tch.name, sheet: tch.sheet };
     p.wordBank = !!r.wordBank || !!p.wbAll;
+    lockTeacher();
     student = String(r.name || name).slice(0, 40);
     store.set('crossword-student', student); store.set('crossword-period', period); store.set('crossword-teacher', tch.name);
     if ([...packSel.options].some(o => o.value === (p.secure || p.title))) packSel.value = p.secure || p.title;
