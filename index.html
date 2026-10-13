@@ -375,8 +375,8 @@ osmosis: Movement of water across a membrane"></textarea>
       <div id="cpResult" hidden>
         <p class="cp-done">Puzzle ready: <b id="cpInfo"></b><br>Puzzle code <b id="cpCode" class="code"></b> (it also appears on each student's results screen, so you can check they did this puzzle).</p>
         <input type="text" id="cpLink" readonly>
-        <div class="row"><button class="btn primary" id="cpCopy" type="button">Copy student link</button></div>
-        <p id="cpSheetHint" class="muted" hidden>To assign it through your class Sheet, paste this link into the <b>Puzzle</b> column on the <b>Assignments</b> tab and tick <b>Active</b>.</p>
+        <div class="row"><button class="btn primary" id="cpCopy" type="button">Copy student link</button><button class="btn" id="cpCopySite" type="button" hidden>Copy link for Google Classroom</button></div>
+        <p id="cpSheetHint" class="muted" hidden>To assign it: paste the student link into the <b>Puzzle</b> column on your Sheet's <b>Assignments</b> tab and tick <b>Active</b>. In Google Classroom, post the short <b>link for Google Classroom</b> (your site's address). Students sign in there and the Sheet gives each one this puzzle. The long student link is too long for Classroom.</p>
       </div>
       <div id="vkBox" class="vk" hidden>
         <h4>Answer keys for each version</h4>
@@ -2383,11 +2383,20 @@ $('#cpBuild').addEventListener('click', async () => {
     $('#cpCode').textContent = P.code;
     $('#cpLink').value = location.href.split('#')[0] + '#p=' + code;
     $('#cpResult').hidden = false;
+    const owner = teacherOfList(name);
+    $('#cpCopySite').hidden = !hasSheet(owner);
+    $('#cpSheetHint').hidden = !hasSheet(owner);
     if (lays.length > 1) $('#ptitle').textContent += ' · Version 1 of ' + lays.length;
     vkInit();
     if (first.missing.length) toast('Couldn’t fit ' + first.missing.join(', ') + ' into the grid. The puzzle uses the rest; try “Pick different words” for another mix.', 7000);
   } catch (err) { toast('Something went wrong building that puzzle. Try again.'); }
   finally { btn.disabled = false; btn.textContent = 'Build puzzle'; }
+});
+$('#cpCopySite').addEventListener('click', () => {
+  const site = location.href.split('#')[0].split('?')[0];
+  const done = () => toast('Copied ' + site + ' for Google Classroom');
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(site).then(done, () => prompt('Copy this address:', site));
+  else prompt('Copy this address:', site);
 });
 $('#cpCopy').addEventListener('click', () => {
   const t = $('#cpLink'); t.select();
