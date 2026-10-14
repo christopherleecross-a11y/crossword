@@ -1711,7 +1711,7 @@ const strip = p => ({ title: p.title || '', diff: p.diff, given: p.given || [], 
   secure: p.secure, layout: p.layout, layoutData: p.layoutData, assign: p.assign, bank: p.bank, source: p.source,
   variants: p.variants, version: p.version, versionChosen: p.versionChosen, wbAll: p.wbAll, wordBank: p.wordBank, tl: p.tl, ss: p.secure && SECURE_SETS[p.secure] ? SECURE_SETS[p.secure].salt : undefined,
   entries: p.entries.map(e => ({ answer: p.secure ? '?'.repeat(e.answer.length) : e.answer, clue: e.clue, r: e.r, c: e.c, dir: e.dir, num: e.num, w: e.w })) });
-function save() { if (P) store.set(SAVE_KEY, { puzzle: strip(P), user, mark, elapsed: timer.elapsed, done, student, integ }); }
+function save() { if (P) { store.set(SAVE_KEY, { puzzle: strip(P), user, mark, elapsed: timer.elapsed, done, student, integ }); cloudSoon(); } }
 
 function enc(obj) {
   const bytes = new TextEncoder().encode(JSON.stringify(obj)); let s = '';
@@ -2040,6 +2040,7 @@ $('#nameStart').addEventListener('click', () => {
   else startAttempt();
   if (hasMouse) cover();
   applyMode(); save(); focusKbd(); repaint();
+  restoreProgress();
   // students ticked for a word bank on the Roster get one on shared links too
   const owner = P.assign && P.assign.sheet ? P.assign : null, mine = P;
   if (owner) sheetGet(owner.sheet, { action: 'assignment', period: owner.period, name: student })
@@ -2423,6 +2424,72 @@ function sheetGet(url, params) {
 // text/plain body keeps this a "simple" request, which Apps Script accepts from any site
 const sheetPost = (url, obj) => fetchJSON(url, { method: 'POST', body: JSON.stringify(obj) });
 
+/* ---- progress kept in the teacher's Sheet, so a student can finish on another Chromebook ---- */
+const DEVICE = (() => { let d = store.get('crossword-device'); if (!d) { d = Math.random().toString(36).slice(2, 10); store.set('crossword-device', d); } return d; })();
+// nothing is sent until this device has loaded any saved work, so a fresh device can't wipe it out
+const cloudOn = () => !!(P && P.secure && P.assign && P.assign.sheet && student && !teacher.on && integ && integ.started && P.restored);
+const lettersOf = () => user.map(row => row.map(ch => ch || '.').join('')).join('');
+async function progressKey(p) { if (!p.code) p.code = await puzzleCode(p); return (p.code || p.title) + '|' + verText(p); }
+let cloudTimer = null, cloudFirst = 0, cloudSig = '', cloudAt = 0, cloudBusy = false, cloudPending = '';
+function cloudSoon() {
+  if (!cloudOn()) return;
+  const sig = lettersOf() + (done ? '!' : '') + integ.away;
+  if (sig === cloudSig && Date.now() - cloudAt < 60000) return;  // nothing new: just a heartbeat each minute
+  if (sig === cloudPending && cloudTimer) return;                // already waiting to send exactly this
+  clearTimeout(cloudTimer); cloudPending = sig;
+  if (!cloudFirst) cloudFirst = Date.now();
+  // send after a 4-second pause in typing, but never wait more than 12 seconds; right away when finished
+  const wait = done ? 0 : Math.max(0, Math.min(4000, 12000 - (Date.now() - cloudFirst)));
+  cloudTimer = setTimeout(() => { cloudTimer = null; pushProgress(false); }, wait);
+}
+async function pushProgress(leaving) {
+  if (!cloudOn() || cloudBusy) return;
+  const mine = P, sig = lettersOf() + (done ? '!' : '') + integ.away;
+  cloudBusy = true; cloudFirst = 0;
+  try {
+    const body = JSON.stringify({ action: 'progress', period: mine.assign.period, student, key: await progressKey(mine), device: DEVICE,
+      started: integ.started, elapsed: timer.elapsed, letters: lettersOf(), away: integ.away || 0, awaySec: integ.awaySec || 0,
+      done: !!done, score: integ.score ? integ.score.correct + ' of ' + integ.score.total : '', merge: mine.restored === 'failed' });
+    if (leaving) fetch(mine.assign.sheet, { method: 'POST', body, keepalive: true }).catch(() => {});
+    else await fetchJSON(mine.assign.sheet, { method: 'POST', body });
+    cloudSig = sig; cloudAt = Date.now();
+  } catch { /* offline: the next change or heartbeat tries again */ }
+  finally { cloudBusy = false; }
+}
+setInterval(() => { if (cloudOn() && !done) cloudSoon(); }, 60000);
+window.addEventListener('pagehide', () => { if (cloudOn()) pushProgress(true); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && cloudOn()) pushProgress(true); });
+
+// on sign-in (on any device), pick up saved work: letters fill only empty squares, and the first start time wins
+async function restoreProgress() {
+  if (!P || !P.secure || !P.assign || !P.assign.sheet || !student || teacher.on) return;
+  const mine = P;
+  let r;
+  try { r = await sheetGet(mine.assign.sheet, { action: 'progress', period: mine.assign.period, name: student, key: await progressKey(mine) }); }
+  catch { mine.restored = 'failed'; save(); return; }   // couldn't check: the Sheet keeps any letters it already has
+  mine.restored = (r && r.ok) ? 'ok' : 'failed';
+  if (P !== mine || !r || !r.ok || !r.found) { save(); return; }
+  let filled = 0;
+  if (r.letters && r.letters.length === P.rows * P.cols) {
+    for (let rr = 0; rr < P.rows; rr++) for (let c = 0; c < P.cols; c++) {
+      const ch = r.letters[rr * P.cols + c];
+      if (sol[rr][c] && /[A-Z]/.test(ch) && !user[rr][c]) { user[rr][c] = ch; filled++; }
+    }
+  }
+  if (r.started && (!integ.started || r.started < integ.started)) integ.started = r.started;
+  timer.elapsed = Math.max(timer.elapsed, r.elapsed || 0);
+  if (timer.running) timer.start = Date.now() - timer.elapsed * 1000;
+  integ.away = Math.max(integ.away || 0, r.away || 0); integ.awaySec = Math.max(integ.awaySec || 0, r.awaySec || 0);
+  integ.devices = new Set([...(r.devices || []), DEVICE]).size;
+  if (r.done && !done) {
+    done = true; stopTimer();
+    const m = String(r.score || '').match(/(\d+)\s*of\s*(\d+)/);
+    if (m) integ.score = { correct: +m[1], total: +m[2], early: +m[1] < +m[2] };
+    toast('You already turned in this puzzle.', 5000);
+  } else if (filled) toast('Picked up where you left off on another device.', 4000);
+  wasFull = isFull(); applyMode(); render(); renderBank(); showTime(); save();
+}
+
 const periodsCache = {};
 async function loadPeriods(sel, url) {
   sel.innerHTML = ''; sel.add(new Option('Loading…', ''));
@@ -2504,6 +2571,7 @@ $('#siGo').addEventListener('click', async () => {
     history.replaceState(null, '', location.pathname + location.search);
     setup(p, null);
     toast('Hi ' + student.split(' ')[0] + '! Your puzzle: ' + p.assign.label, 3500);
+    restoreProgress();
     focusKbd();
   } catch {
     siMsg('Couldn’t reach your teacher’s class sheet. Check your internet connection and try again.');
@@ -2536,6 +2604,7 @@ function resultPayload(id) {
     code: P.code || '', share: shareCode(P), timeSec: timer.elapsed, wordBank: !!showBank(),
     version: verText(P),
     away: integ.away || 0, awaySec: integ.awaySec || 0, attempts: isTest() ? cum : '',
+    devices: integ.devices || 1,
     teacher: !!integ.teacher, revealed: mark.some(row => row.includes('revealed')), finishedAt: new Date().toISOString(),
     score: integ.score ? integ.score.correct + ' of ' + integ.score.total : '', status: integ.score && integ.score.timeout ? 'Time ran out' : integ.score && integ.score.early ? 'Turned in early' : 'Solved',
     words: integ.words || []
@@ -2621,7 +2690,7 @@ kbd.addEventListener('input', e => {
   // with sign-in on, only an unfinished ASSIGNED puzzle comes back by itself; anything else waits for sign-in
   const resume = !signin || (saved && saved.puzzle && saved.puzzle.assign && !saved.done);
   if (saved && saved.puzzle && saved.puzzle.entries && saved.puzzle.entries.length && !stale && resume) {
-    try { setup(saved.puzzle, saved); return; } catch {}
+    try { setup(saved.puzzle, saved); restoreProgress(); return; } catch {}
   }
   if (signin) {
     // a practice puzzle waits, hidden, behind the sign-in screen
