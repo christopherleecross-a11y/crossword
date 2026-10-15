@@ -167,6 +167,7 @@ body.signing main,body.signing .toolbar,body.signing .controls,body.signing .mod
 .modebar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-radius:12px;padding:10px 14px;margin-bottom:12px;font-weight:600}
 .modebar.assigned{background:color-mix(in srgb,var(--given) 14%,var(--panel));border:1px solid color-mix(in srgb,var(--given) 45%,transparent)}
 .modebar.practice{background:color-mix(in srgb,var(--sel) 22%,var(--panel));border:1px solid color-mix(in srgb,var(--sel) 70%,transparent)}
+.modebar[hidden]{display:none}
 @media print{.modebar{display:none!important}}
 .si-teacher button,.foot button{background:none;border:0;color:var(--muted);font-size:.8rem;cursor:pointer;text-decoration:underline;margin:0 8px}
 .send-line{margin:6px 0 0!important;font-weight:600}
@@ -379,19 +380,23 @@ osmosis: Movement of water across a membrane"></textarea>
         <p id="cpSheetHint" class="muted" hidden>To assign it: paste the student link into the <b>Puzzle</b> column on your Sheet's <b>Assignments</b> tab and tick <b>Active</b>. In Google Classroom, post the short <b>link for Google Classroom</b> (your site's address). Students sign in there and the Sheet gives each one this puzzle. The long student link is too long for Classroom.</p>
       </div>
       <div id="vkBox" class="vk" hidden>
-        <h4>Answer keys for each version</h4>
+        <h4>Each student's puzzle</h4>
         <p class="muted" id="vkInfo"></p>
         <div class="cp-row">
           <label>Student <input type="text" id="vkName" placeholder="First and last name" autocomplete="off"></label>
-          <button class="btn" id="vkShow" type="button">Show their version</button>
+          <label id="vkPerRow">Period <select id="vkPer"></select></label>
         </div>
         <div class="cp-row">
+          <button class="btn" id="vkShow" type="button">Show their version</button>
+          <button class="btn primary" id="vkWork" type="button">Show their work</button>
+        </div>
+        <div class="cp-row" id="vkVerRow">
           <label>Or version <select id="vkSel"></select></label>
           <button class="btn" id="vkShowV" type="button">Show</button>
           <button class="btn" id="vkPrintAll" type="button">Print all answer keys</button>
         </div>
       </div>
-      <p id="vkHint" class="muted">To see answer keys for an assignment with several versions, build it above or open its student link, then unlock teacher mode.</p>
+      <p id="vkHint" class="muted">To see a student's version or their work, open the assignment first: build it above, or open its student link and unlock teacher mode. For a list name assigned in your Sheet, choose that list and the same difficulty from the menu.</p>
       <details class="cp-more"><summary><h4>Protected word lists</h4></summary>
       <p>Your lists are below (other teachers' lists aren't shown and are kept as they are). Edit, add, or remove lists here. Start each list's name with one of your courses, like <code>## Geometry 2: Unit 5</code>, then then one word per line as <code>ANSWER | clue | harder clue</code> (the harder clue is optional). Pick a password, click Generate, then in index.html replace the whole line that starts with <code>const SECURE_SETS =</code> with the new code.</p>
       <textarea id="tLists" spellcheck="false"></textarea>
@@ -2238,16 +2243,79 @@ function vkSource() {
   if (P.layout >= 0 && L.length > 1) return { n: L.length, make: i => makeSecurePuzzle(P.secure, i, P.diff), cur: P.layout, link: false };
   return null;
 }
+// "Show their work" needs a test-mode puzzle the teacher has unlocked, and that list's teacher must have a Sheet
+const vkOwner = () => (P && P.secure ? teacherOfList(P.secure) : null);
+const vkWorkOK = () => !!(teacher.on && P && P.secure && teacher.answers[P.secure] && hasSheet(vkOwner()));
+let vkBase = null;   // the assignment as built or opened (not one student's copy), so every lookup starts from it
 function vkInit() {
-  const s = teacher.on ? vkSource() : null;
-  $('#vkBox').hidden = !s; $('#vkHint').hidden = !!s;
-  if (!s) return;
-  $('#vkInfo').textContent = P.title + ' · ' + DIFFS[P.diff].label + ' · ' + s.n + (s.link ? ' versions' : ' grids (when this list name is assigned in your Sheet)') +
-    '. On screen now: Version ' + (s.cur + 1) + '. The Version column in your Results tab tells you which one each student had.';
-  const sel = $('#vkSel'); sel.innerHTML = '';
-  for (let i = 0; i < s.n; i++) sel.add(new Option('Version ' + (i + 1), String(i)));
-  sel.value = String(s.cur);
+  if (P && P.secure && !P.vkStudent) vkBase = P;
+  const s = teacher.on ? vkSource() : null, work = vkWorkOK();
+  $('#vkBox').hidden = !(s || work); $('#vkHint').hidden = !!(s || work);
+  $('#vkVerRow').hidden = !s; $('#vkShow').hidden = !s; $('#vkWork').hidden = !work; $('#vkPerRow').hidden = !work;
+  if (!(s || work)) return;
+  $('#vkInfo').textContent = P.title + ' · ' + DIFFS[P.diff].label +
+    (s ? ' · ' + s.n + (s.link ? ' versions' : ' grids (when this list name is assigned in your Sheet)') + '. On screen now: Version ' + (s.cur + 1) + '.' : ' · same puzzle for everyone.') +
+    (work ? ' Show their work loads what a student has typed so far, from your Sheet.' : '');
+  if (s) {
+    const sel = $('#vkSel'); sel.innerHTML = '';
+    for (let i = 0; i < s.n; i++) sel.add(new Option('Version ' + (i + 1), String(i)));
+    sel.value = String(s.cur);
+  }
+  if (work && $('#vkPer').dataset.for !== vkOwner().sheet) {
+    $('#vkPer').dataset.for = vkOwner().sheet;
+    loadPeriods($('#vkPer'), vkOwner().sheet).catch(() => { $('#vkPer').innerHTML = ''; $('#vkPer').add(new Option('Couldn’t load periods', '')); });
+  }
 }
+// a student's own copy of the assignment: the version their name gets, keyed exactly as the student's device saves it
+function vkStudentPuzzle(who, period) {
+  const base = vkBase && vkBase.secure === P.secure ? vkBase : P;
+  let np, s = null;
+  if (base.variants) {
+    const i = versionIndex(who, base.variants.length);
+    np = makeAssignedPuzzle(base.secure, base.variants[i], base.diff);
+    Object.assign(np, { source: base.source, wbAll: base.wbAll, tl: base.tl, variants: base.variants, version: i + 1, versionChosen: true });
+  } else if (base.layoutData) {
+    np = makeAssignedPuzzle(base.secure, base.layoutData, base.diff); np.source = base.source; np.tl = base.tl;
+  } else {
+    const L = SECURE_SETS[base.secure].layouts;
+    np = makeSecurePuzzle(base.secure, versionIndex(who, L.length), base.diff);
+  }
+  np.code = base.layoutData || base.variants ? base.code : '';
+  np.assign = { period, label: 'Teacher view', teacher: vkOwner().name, sheet: vkOwner().sheet };
+  np.vkStudent = who;
+  return np;
+}
+$('#vkWork').addEventListener('click', async () => {
+  const who = $('#vkName').value.trim().replace(/\s+/g, ' '), period = $('#vkPer').value;
+  if (who.split(' ').length < 2) { toast('Type the student’s first and last name, spelled as on your Roster.'); return; }
+  if (!period) { toast('Choose the student’s class period.'); return; }
+  const btn = $('#vkWork'); btn.disabled = true; btn.textContent = 'Looking…';
+  try {
+    const np = vkStudentPuzzle(who, period);
+    if (!np.code) np.code = await puzzleCode(np);
+    const r = await sheetGet(vkOwner().sheet, { action: 'progress', period, name: who, key: await progressKey(np) });
+    if (!r || !r.ok) { toast('Couldn’t reach your class sheet. Check your internet connection and try again.', 5000); return; }
+    if (!r.found) { toast('No saved work for ' + who + ' (period ' + period + ') on this puzzle. Check the spelling and period, and that this is the puzzle they were assigned.', 6000); return; }
+    setup(np, null);   // teacher mode: the answers are known, so wrong letters can be marked
+    let typed = 0, wrong = 0;
+    if (r.letters && r.letters.length === P.rows * P.cols) {
+      for (let rr = 0; rr < P.rows; rr++) for (let c = 0; c < P.cols; c++) {
+        const ch = r.letters[rr * P.cols + c];
+        if (sol[rr][c] && /[A-Z]/.test(ch)) { user[rr][c] = ch; typed++; if (ch !== sol[rr][c]) { mark[rr][c] = 'wrong'; wrong++; } }
+      }
+    }
+    const right = P.entries.filter(e => e.cells.every(([rr, c]) => user[rr][c] === sol[rr][c])).length;
+    done = true; stopTimer();
+    timer.elapsed = r.elapsed || 0; showTime();
+    render(); renderBank(true); applyMode(); save();
+    $('#ptitle').textContent += ' · ' + who + '’s work' + (verText(P) ? ' (Version ' + verText(P) + ')' : '');
+    closeModals();
+    toast(who + ': ' + right + ' of ' + P.entries.length + ' words right, ' + wrong + ' wrong letter' + (wrong === 1 ? '' : 's') + ' (marked). ' +
+      (r.done ? 'Turned in' + (r.score ? ': ' + r.score : '') + '.' : 'Still working: this is what they had at the last save.'), 7000);
+  } catch { toast('Something went wrong loading that student’s work. Try again.', 5000); }
+  finally { btn.disabled = false; btn.textContent = 'Show their work'; }
+});
+$('#vkName').addEventListener('keydown', e => { if (e.key === 'Enter') (vkWorkOK() ? $('#vkWork') : $('#vkShow')).click(); });
 function vkShow(i, who) {
   const s = vkSource(); if (!s) return;
   const old = P, np = s.make(i);
@@ -2264,7 +2332,6 @@ $('#vkShow').addEventListener('click', () => {
   if (who.split(' ').length < 2) { toast('Type the student’s first and last name, spelled as on your Roster.'); return; }
   vkShow(versionIndex(who, s.n), who);
 });
-$('#vkName').addEventListener('keydown', e => { if (e.key === 'Enter') $('#vkShow').click(); });
 $('#vkShowV').addEventListener('click', () => vkShow(+$('#vkSel').value));
 $('#vkPrintAll').addEventListener('click', () => {
   const s = vkSource(); if (!s) return;
